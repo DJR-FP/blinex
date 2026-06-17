@@ -46,9 +46,22 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 
 ---
 
+## Docker Images
+
+Pre-built images are published to GitHub Container Registry:
+
+| Image | Pull command |
+|---|---|
+| Management | `docker pull ghcr.io/djr-fp/overlay/management:latest` |
+| Signal | `docker pull ghcr.io/djr-fp/overlay/signal:latest` |
+| Relay | `docker pull ghcr.io/djr-fp/overlay/relay:latest` |
+| Dashboard | `docker pull ghcr.io/djr-fp/overlay/dashboard:latest` |
+
+Image sizes: management 38MB · signal 19MB · relay 13MB · dashboard 155MB
+
 ## Quick Start
 
-### Docker Compose
+### Docker Compose (pre-built images)
 
 ```bash
 git clone https://github.com/DJR-FP/overlay.git

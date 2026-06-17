@@ -15,6 +15,7 @@ services:
       retries: 10
 
   management:
+    image: ghcr.io/djr-fp/overlay/management:latest
     build:
       context: .
       dockerfile: management/Dockerfile
@@ -35,6 +36,7 @@ services:
         condition: service_healthy
 
   signal:
+    image: ghcr.io/djr-fp/overlay/signal:latest
     build:
       context: .
       dockerfile: signal/Dockerfile
@@ -45,6 +47,7 @@ services:
       - "10000:10000"
 
   relay:
+    image: ghcr.io/djr-fp/overlay/relay:latest
     build:
       context: .
       dockerfile: relay/Dockerfile
@@ -59,11 +62,12 @@ services:
       - "3478:3478/udp"
 
   dashboard:
+    image: ghcr.io/djr-fp/overlay/dashboard:latest
     build:
       context: ./dashboard
+      args:
+        NEXT_PUBLIC_MGMT_API: "${NEXT_PUBLIC_MGMT_API:-http://localhost:8080}"
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_MGMT_API: "http://management:8080"
     ports:
       - "3000:3000"
     depends_on:

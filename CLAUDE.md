@@ -30,6 +30,24 @@ export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
 
 Node.js: `/home/clouduser/node/bin/node` (v20)
 
+## Docker images
+
+```bash
+# Build all images (from repo root)
+docker build -t ghcr.io/djr-fp/overlay/management:latest -f management/Dockerfile .
+docker build -t ghcr.io/djr-fp/overlay/signal:latest     -f signal/Dockerfile .
+docker build -t ghcr.io/djr-fp/overlay/relay:latest      -f relay/Dockerfile .
+docker build -t ghcr.io/djr-fp/overlay/dashboard:latest  ./dashboard
+
+# Push to GHCR (requires: echo $CR_PAT | docker login ghcr.io -u DJR-FP --password-stdin)
+docker push ghcr.io/djr-fp/overlay/management:latest
+docker push ghcr.io/djr-fp/overlay/signal:latest
+docker push ghcr.io/djr-fp/overlay/relay:latest
+docker push ghcr.io/djr-fp/overlay/dashboard:latest
+```
+
+Each Dockerfile creates a minimal workspace (gen + the target module only) to avoid the full go.work file. All images use golang:1.25-alpine builder → alpine:3.20 runtime, run as non-root `meshnet` user.
+
 ## Build commands
 
 ```bash
