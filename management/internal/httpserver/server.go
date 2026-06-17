@@ -68,6 +68,12 @@ func (s *Server) registerRoutes() {
 	auth.GET("/setup-keys", s.listSetupKeys)
 	auth.POST("/setup-keys", s.createSetupKey)
 	auth.DELETE("/setup-keys/:id", s.deleteSetupKey)
+
+	// Access control rules
+	auth.GET("/rules", s.listRules)
+	auth.POST("/rules", s.createRule)
+	auth.PUT("/rules/:id", s.updateRule)
+	auth.DELETE("/rules/:id", s.deleteRule)
 }
 
 func (s *Server) health(c *gin.Context) {
@@ -187,6 +193,147 @@ func (s *Server) deleteSetupKey(c *gin.Context) {
 	if err := s.store.DeleteSetupKey(c.Request.Context(), claims.AccountID, id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) listRules(c *gin.Context) {
+	claims := claimsFromCtx(c)
+	rules, err := s.store.GetRulesByAccount(c.Request.Context(), claims.AccountID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rules": rules})
+}
+
+func (s *Server) createRule(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name" binding:"required"`
+		Src      string `json:"src" binding:"required"`
+		Dst      string `json:"dst" binding:"required"`
+		Protocol string `json:"protocol" binding:"required"`
+		Port     int    `json:"port"`
+		Action   string `json:"action" binding:"required"`
+		Enabled  bool   `json:"enabled"`
+		Priority int    `json:"priority"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Action != "allow" && req.Action != "deny" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "action must be 'allow' or 'deny'"})
+		return
+	}
+
+	claims := claimsFromCtx(c)
+	rule := &domain.Rule{
+		ID:        uuid.NewString(),
+		AccountID: claims.AccountID,
+		Name:      req.Name,
+		Src:       req.Src,
+		Dst:       req.Dst,
+		Protocol:  req.Protocol,
+		Port:      req.Port,
+		Action:    req.Action,
+		Enabled:   req.Enabled,
+		Priority:  req.Priority,
+		CreatedAt: time.Now(),
+	}
+	if err := s.store.SaveRule(c.Request.Context(), rule); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if s.notify != nil {
+		s.notify(claims.AccountID)
+	}
+	c.JSON(http.StatusCreated, gin.H{"rule": rule})
+}
+
+func (s *Server) updateRule(c *gin.Context) {
+	id := c.Param("id")
+	claims := claimsFromCtx(c)
+
+	rules, err := s.store.GetRulesByAccount(c.Request.Context(), claims.AccountID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var existing *domain.Rule
+	for _, r := range rules {
+		if r.ID == id {
+			existing = r
+			break
+		}
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		return
+	}
+
+	var req struct {
+		Name     *string `json:"name"`
+		Src      *string `json:"src"`
+		Dst      *string `json:"dst"`
+		Protocol *string `json:"protocol"`
+		Port     *int    `json:"port"`
+		Action   *string `json:"action"`
+		Enabled  *bool   `json:"enabled"`
+		Priority *int    `json:"priority"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Name != nil {
+		existing.Name = *req.Name
+	}
+	if req.Src != nil {
+		existing.Src = *req.Src
+	}
+	if req.Dst != nil {
+		existing.Dst = *req.Dst
+	}
+	if req.Protocol != nil {
+		existing.Protocol = *req.Protocol
+	}
+	if req.Port != nil {
+		existing.Port = *req.Port
+	}
+	if req.Action != nil {
+		if *req.Action != "allow" && *req.Action != "deny" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "action must be 'allow' or 'deny'"})
+			return
+		}
+		existing.Action = *req.Action
+	}
+	if req.Enabled != nil {
+		existing.Enabled = *req.Enabled
+	}
+	if req.Priority != nil {
+		existing.Priority = *req.Priority
+	}
+
+	if err := s.store.SaveRule(c.Request.Context(), existing); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if s.notify != nil {
+		s.notify(claims.AccountID)
+	}
+	c.JSON(http.StatusOK, gin.H{"rule": existing})
+}
+
+func (s *Server) deleteRule(c *gin.Context) {
+	id := c.Param("id")
+	claims := claimsFromCtx(c)
+	if err := s.store.DeleteRule(c.Request.Context(), claims.AccountID, id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if s.notify != nil {
+		s.notify(claims.AccountID)
 	}
 	c.Status(http.StatusNoContent)
 }

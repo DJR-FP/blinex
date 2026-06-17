@@ -140,7 +140,11 @@ func (s *Server) Sync(req *managementv1.SyncRequest, stream managementv1.Managem
 		if err != nil {
 			return fmt.Errorf("listing peers: %w", err)
 		}
-		resp := s.buildSyncResponse(peers)
+		rules, err := s.store.GetRulesByAccount(stream.Context(), peer.AccountID)
+		if err != nil {
+			return fmt.Errorf("listing rules: %w", err)
+		}
+		resp := s.buildSyncResponse(peers, rules)
 		return stream.Send(resp)
 	}
 
@@ -181,7 +185,7 @@ func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePee
 	return &managementv1.UpdatePeerMetaResponse{}, nil
 }
 
-func (s *Server) buildSyncResponse(peers []*domain.Peer) *managementv1.SyncResponse {
+func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.Rule) *managementv1.SyncResponse {
 	var pbPeers []*commonv1.Peer
 	var routes []*commonv1.Route
 
@@ -213,9 +217,25 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer) *managementv1.SyncRespo
 		}
 	}
 
+	var pbRules []*commonv1.Rule
+	for _, r := range domainRules {
+		pbRules = append(pbRules, &commonv1.Rule{
+			Id:       r.ID,
+			Name:     r.Name,
+			Src:      r.Src,
+			Dst:      r.Dst,
+			Protocol: r.Protocol,
+			Port:     int32(r.Port),
+			Action:   r.Action,
+			Enabled:  r.Enabled,
+			Priority: int32(r.Priority),
+		})
+	}
+
 	return &managementv1.SyncResponse{
 		Peers:  pbPeers,
 		Routes: routes,
+		Rules:  pbRules,
 		Serial: fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
 }

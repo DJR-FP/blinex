@@ -445,6 +445,114 @@ func (x *NameServer) GetIsPrimary() bool {
 	return false
 }
 
+type Rule struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Src           string                 `protobuf:"bytes,3,opt,name=src,proto3" json:"src,omitempty"`           // source CIDR, peer IP, or "*" for any
+	Dst           string                 `protobuf:"bytes,4,opt,name=dst,proto3" json:"dst,omitempty"`           // destination CIDR, peer IP, or "*" for any
+	Protocol      string                 `protobuf:"bytes,5,opt,name=protocol,proto3" json:"protocol,omitempty"` // "tcp", "udp", "icmp", "all"
+	Port          int32                  `protobuf:"varint,6,opt,name=port,proto3" json:"port,omitempty"`        // destination port; 0 = any
+	Action        string                 `protobuf:"bytes,7,opt,name=action,proto3" json:"action,omitempty"`     // "allow" or "deny"
+	Enabled       bool                   `protobuf:"varint,8,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Priority      int32                  `protobuf:"varint,9,opt,name=priority,proto3" json:"priority,omitempty"` // lower number = evaluated first
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Rule) Reset() {
+	*x = Rule{}
+	mi := &file_common_v1_types_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Rule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Rule) ProtoMessage() {}
+
+func (x *Rule) ProtoReflect() protoreflect.Message {
+	mi := &file_common_v1_types_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Rule.ProtoReflect.Descriptor instead.
+func (*Rule) Descriptor() ([]byte, []int) {
+	return file_common_v1_types_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *Rule) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Rule) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Rule) GetSrc() string {
+	if x != nil {
+		return x.Src
+	}
+	return ""
+}
+
+func (x *Rule) GetDst() string {
+	if x != nil {
+		return x.Dst
+	}
+	return ""
+}
+
+func (x *Rule) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *Rule) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *Rule) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *Rule) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *Rule) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
 var File_common_v1_types_proto protoreflect.FileDescriptor
 
 const file_common_v1_types_proto_rawDesc = "" +
@@ -485,7 +593,17 @@ const file_common_v1_types_proto_rawDesc = "" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
 	"\n" +
-	"is_primary\x18\x03 \x01(\bR\tisPrimaryB+Z)github.com/meshnet/gen/common/v1;commonv1b\x06proto3"
+	"is_primary\x18\x03 \x01(\bR\tisPrimary\"\xcc\x01\n" +
+	"\x04Rule\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
+	"\x03src\x18\x03 \x01(\tR\x03src\x12\x10\n" +
+	"\x03dst\x18\x04 \x01(\tR\x03dst\x12\x1a\n" +
+	"\bprotocol\x18\x05 \x01(\tR\bprotocol\x12\x12\n" +
+	"\x04port\x18\x06 \x01(\x05R\x04port\x12\x16\n" +
+	"\x06action\x18\a \x01(\tR\x06action\x12\x18\n" +
+	"\aenabled\x18\b \x01(\bR\aenabled\x12\x1a\n" +
+	"\bpriority\x18\t \x01(\x05R\bpriorityB+Z)github.com/meshnet/gen/common/v1;commonv1b\x06proto3"
 
 var (
 	file_common_v1_types_proto_rawDescOnce sync.Once
@@ -499,7 +617,7 @@ func file_common_v1_types_proto_rawDescGZIP() []byte {
 	return file_common_v1_types_proto_rawDescData
 }
 
-var file_common_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_common_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_common_v1_types_proto_goTypes = []any{
 	(*Peer)(nil),          // 0: common.v1.Peer
 	(*PeerMeta)(nil),      // 1: common.v1.PeerMeta
@@ -507,6 +625,7 @@ var file_common_v1_types_proto_goTypes = []any{
 	(*Route)(nil),         // 3: common.v1.Route
 	(*DNSConfig)(nil),     // 4: common.v1.DNSConfig
 	(*NameServer)(nil),    // 5: common.v1.NameServer
+	(*Rule)(nil),          // 6: common.v1.Rule
 }
 var file_common_v1_types_proto_depIdxs = []int32{
 	5, // 0: common.v1.DNSConfig.name_servers:type_name -> common.v1.NameServer
@@ -528,7 +647,7 @@ func file_common_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_v1_types_proto_rawDesc), len(file_common_v1_types_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

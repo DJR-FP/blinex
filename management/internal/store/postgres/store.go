@@ -47,6 +47,20 @@ type peer struct {
 	CreatedAt        time.Time
 }
 
+type rule struct {
+	ID        string    `gorm:"primaryKey"`
+	AccountID string    `gorm:"index"`
+	Name      string
+	Src       string
+	Dst       string
+	Protocol  string
+	Port      int
+	Action    string
+	Enabled   bool
+	Priority  int
+	CreatedAt time.Time
+}
+
 // Store ———————————————————————————————————————————————————————————————————————
 
 // Store is a PostgreSQL-backed implementation of store.Store.
@@ -65,7 +79,7 @@ func New(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("connecting to postgres: %w", err)
 	}
 
-	if err := db.AutoMigrate(&account{}, &setupKey{}, &peer{}); err != nil {
+	if err := db.AutoMigrate(&account{}, &setupKey{}, &peer{}, &rule{}); err != nil {
 		return nil, fmt.Errorf("auto-migrate: %w", err)
 	}
 
@@ -191,6 +205,45 @@ func (s *Store) DeletePeer(_ context.Context, wgPubKey string) error {
 	return s.db.Where("wg_pub_key = ?", wgPubKey).Delete(&peer{}).Error
 }
 
+func (s *Store) GetRulesByAccount(_ context.Context, accountID string) ([]*domain.Rule, error) {
+	var rows []rule
+	if err := s.db.Where("account_id = ?", accountID).Order("priority asc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Rule, len(rows))
+	for i, r := range rows {
+		out[i] = toDomainRule(&r)
+	}
+	return out, nil
+}
+
+func (s *Store) SaveRule(_ context.Context, dr *domain.Rule) error {
+	return s.db.Save(&rule{
+		ID:        dr.ID,
+		AccountID: dr.AccountID,
+		Name:      dr.Name,
+		Src:       dr.Src,
+		Dst:       dr.Dst,
+		Protocol:  dr.Protocol,
+		Port:      dr.Port,
+		Action:    dr.Action,
+		Enabled:   dr.Enabled,
+		Priority:  dr.Priority,
+		CreatedAt: dr.CreatedAt,
+	}).Error
+}
+
+func (s *Store) DeleteRule(_ context.Context, accountID, id string) error {
+	result := s.db.Where("id = ? AND account_id = ?", id, accountID).Delete(&rule{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("rule not found")
+	}
+	return nil
+}
+
 // helpers ————————————————————————————————————————————————————————————————————
 
 func toDomainSetupKey(sk *setupKey) *domain.SetupKey {
@@ -221,6 +274,22 @@ func toDomainPeer(p *peer) *domain.Peer {
 		Connected:        p.Connected,
 		LastSeen:         p.LastSeen,
 		CreatedAt:        p.CreatedAt,
+	}
+}
+
+func toDomainRule(r *rule) *domain.Rule {
+	return &domain.Rule{
+		ID:        r.ID,
+		AccountID: r.AccountID,
+		Name:      r.Name,
+		Src:       r.Src,
+		Dst:       r.Dst,
+		Protocol:  r.Protocol,
+		Port:      r.Port,
+		Action:    r.Action,
+		Enabled:   r.Enabled,
+		Priority:  r.Priority,
+		CreatedAt: r.CreatedAt,
 	}
 }
 

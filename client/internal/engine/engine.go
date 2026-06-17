@@ -11,6 +11,7 @@ import (
 	commonv1 "github.com/meshnet/gen/common/v1"
 	managementv1 "github.com/meshnet/gen/management/v1"
 	signalv1 "github.com/meshnet/gen/signal/v1"
+	"github.com/meshnet/client/internal/acl"
 	"github.com/meshnet/client/internal/config"
 	"github.com/meshnet/client/internal/dns"
 	"github.com/meshnet/client/internal/ice"
@@ -239,6 +240,15 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		e.dns.Remove(p.DnsLabel)
 		e.ice.ClosePeer(p.WgPubKey)
 		log.Info().Str("peer", p.Hostname).Msg("peer removed")
+	}
+
+	// Apply ACL rules.
+	if len(resp.Rules) > 0 {
+		if err := acl.EnsureChain(e.cfg.WGInterface); err != nil {
+			log.Warn().Err(err).Msg("ACL chain setup failed")
+		} else if err := acl.ApplyRules(resp.Rules, e.cfg.WGInterface); err != nil {
+			log.Warn().Err(err).Msg("ACL rule apply failed")
+		}
 	}
 
 	return nil

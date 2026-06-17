@@ -273,6 +273,7 @@ type SyncResponse struct {
 	Network       *v1.NetworkConfig      `protobuf:"bytes,3,opt,name=network,proto3" json:"network,omitempty"`
 	DnsConfig     *v1.DNSConfig          `protobuf:"bytes,4,opt,name=dns_config,json=dnsConfig,proto3" json:"dns_config,omitempty"`
 	Serial        string                 `protobuf:"bytes,5,opt,name=serial,proto3" json:"serial,omitempty"` // monotonic, client caches this
+	Rules         []*v1.Rule             `protobuf:"bytes,6,rep,name=rules,proto3" json:"rules,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -340,6 +341,13 @@ func (x *SyncResponse) GetSerial() string {
 		return x.Serial
 	}
 	return ""
+}
+
+func (x *SyncResponse) GetRules() []*v1.Rule {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
 }
 
 type UpdatePeerMetaRequest struct {
@@ -449,14 +457,15 @@ const file_management_v1_management_proto_rawDesc = "" +
 	"\x05token\x18\x03 \x01(\tR\x05token\"+\n" +
 	"\vSyncRequest\x12\x1c\n" +
 	"\n" +
-	"wg_pub_key\x18\x01 \x01(\tR\bwgPubKey\"\xe0\x01\n" +
+	"wg_pub_key\x18\x01 \x01(\tR\bwgPubKey\"\x87\x02\n" +
 	"\fSyncResponse\x12%\n" +
 	"\x05peers\x18\x01 \x03(\v2\x0f.common.v1.PeerR\x05peers\x12(\n" +
 	"\x06routes\x18\x02 \x03(\v2\x10.common.v1.RouteR\x06routes\x122\n" +
 	"\anetwork\x18\x03 \x01(\v2\x18.common.v1.NetworkConfigR\anetwork\x123\n" +
 	"\n" +
 	"dns_config\x18\x04 \x01(\v2\x14.common.v1.DNSConfigR\tdnsConfig\x12\x16\n" +
-	"\x06serial\x18\x05 \x01(\tR\x06serial\"^\n" +
+	"\x06serial\x18\x05 \x01(\tR\x06serial\x12%\n" +
+	"\x05rules\x18\x06 \x03(\v2\x0f.common.v1.RuleR\x05rules\"^\n" +
 	"\x15UpdatePeerMetaRequest\x12\x1c\n" +
 	"\n" +
 	"wg_pub_key\x18\x01 \x01(\tR\bwgPubKey\x12'\n" +
@@ -495,6 +504,7 @@ var file_management_v1_management_proto_goTypes = []any{
 	(*v1.Peer)(nil),                // 10: common.v1.Peer
 	(*v1.Route)(nil),               // 11: common.v1.Route
 	(*v1.DNSConfig)(nil),           // 12: common.v1.DNSConfig
+	(*v1.Rule)(nil),                // 13: common.v1.Rule
 }
 var file_management_v1_management_proto_depIdxs = []int32{
 	8,  // 0: management.v1.LoginRequest.meta:type_name -> common.v1.PeerMeta
@@ -503,20 +513,21 @@ var file_management_v1_management_proto_depIdxs = []int32{
 	11, // 3: management.v1.SyncResponse.routes:type_name -> common.v1.Route
 	9,  // 4: management.v1.SyncResponse.network:type_name -> common.v1.NetworkConfig
 	12, // 5: management.v1.SyncResponse.dns_config:type_name -> common.v1.DNSConfig
-	8,  // 6: management.v1.UpdatePeerMetaRequest.meta:type_name -> common.v1.PeerMeta
-	0,  // 7: management.v1.ManagementService.GetServerKey:input_type -> management.v1.GetServerKeyRequest
-	2,  // 8: management.v1.ManagementService.Login:input_type -> management.v1.LoginRequest
-	4,  // 9: management.v1.ManagementService.Sync:input_type -> management.v1.SyncRequest
-	6,  // 10: management.v1.ManagementService.UpdatePeerMeta:input_type -> management.v1.UpdatePeerMetaRequest
-	1,  // 11: management.v1.ManagementService.GetServerKey:output_type -> management.v1.GetServerKeyResponse
-	3,  // 12: management.v1.ManagementService.Login:output_type -> management.v1.LoginResponse
-	5,  // 13: management.v1.ManagementService.Sync:output_type -> management.v1.SyncResponse
-	7,  // 14: management.v1.ManagementService.UpdatePeerMeta:output_type -> management.v1.UpdatePeerMetaResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	13, // 6: management.v1.SyncResponse.rules:type_name -> common.v1.Rule
+	8,  // 7: management.v1.UpdatePeerMetaRequest.meta:type_name -> common.v1.PeerMeta
+	0,  // 8: management.v1.ManagementService.GetServerKey:input_type -> management.v1.GetServerKeyRequest
+	2,  // 9: management.v1.ManagementService.Login:input_type -> management.v1.LoginRequest
+	4,  // 10: management.v1.ManagementService.Sync:input_type -> management.v1.SyncRequest
+	6,  // 11: management.v1.ManagementService.UpdatePeerMeta:input_type -> management.v1.UpdatePeerMetaRequest
+	1,  // 12: management.v1.ManagementService.GetServerKey:output_type -> management.v1.GetServerKeyResponse
+	3,  // 13: management.v1.ManagementService.Login:output_type -> management.v1.LoginResponse
+	5,  // 14: management.v1.ManagementService.Sync:output_type -> management.v1.SyncResponse
+	7,  // 15: management.v1.ManagementService.UpdatePeerMeta:output_type -> management.v1.UpdatePeerMetaResponse
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_management_v1_management_proto_init() }

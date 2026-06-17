@@ -13,6 +13,31 @@ export interface Peer {
   advertised_routes?: string[]
 }
 
+export interface Rule {
+  id: string
+  account_id: string
+  name: string
+  src: string
+  dst: string
+  protocol: string
+  port: number
+  action: 'allow' | 'deny'
+  enabled: boolean
+  priority: number
+  created_at: string
+}
+
+export interface RulePayload {
+  name: string
+  src: string
+  dst: string
+  protocol: string
+  port?: number
+  action: 'allow' | 'deny'
+  enabled: boolean
+  priority?: number
+}
+
 export interface SetupKey {
   id: string
   name: string
@@ -69,6 +94,24 @@ export const api = {
       }),
     delete: (token: string, id: string) =>
       request<void>(`/setup-keys/${encodeURIComponent(id)}`, token, {
+        method: 'DELETE',
+      }),
+  },
+  rules: {
+    list: (token: string) =>
+      request<{ rules: Rule[] }>('/rules', token),
+    create: (token: string, payload: RulePayload) =>
+      request<{ rule: Rule }>('/rules', token, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    update: (token: string, id: string, payload: Partial<RulePayload>) =>
+      request<{ rule: Rule }>(`/rules/${encodeURIComponent(id)}`, token, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    delete: (token: string, id: string) =>
+      request<void>(`/rules/${encodeURIComponent(id)}`, token, {
         method: 'DELETE',
       }),
   },

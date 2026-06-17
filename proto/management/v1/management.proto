@@ -49,6 +49,7 @@ message SyncResponse {
   common.v1.NetworkConfig      network    = 3;
   common.v1.DNSConfig          dns_config = 4;
   string                       serial     = 5; // monotonic, client caches this
+  repeated common.v1.Rule      rules      = 6;
 }
 
 message UpdatePeerMetaRequest {

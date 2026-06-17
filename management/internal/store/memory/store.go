@@ -18,6 +18,7 @@ type Store struct {
 	accounts  map[string]*domain.Account
 	setupKeys map[string]*domain.SetupKey // keyed by SetupKey.Key (the secret token)
 	peers     map[string]*domain.Peer     // keyed by WGPubKey
+	rules     map[string]*domain.Rule     // keyed by Rule.ID
 }
 
 var _ store.Store = (*Store)(nil)
@@ -27,6 +28,7 @@ func New() *Store {
 		accounts:  make(map[string]*domain.Account),
 		setupKeys: make(map[string]*domain.SetupKey),
 		peers:     make(map[string]*domain.Peer),
+		rules:     make(map[string]*domain.Rule),
 	}
 	// Seed a default account and setup key so you can enroll immediately.
 	accountID := "default"
@@ -150,5 +152,37 @@ func (s *Store) DeletePeer(ctx context.Context, wgPubKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.peers, wgPubKey)
+	return nil
+}
+
+func (s *Store) GetRulesByAccount(_ context.Context, accountID string) ([]*domain.Rule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*domain.Rule
+	for _, r := range s.rules {
+		if r.AccountID == accountID {
+			cp := *r
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) SaveRule(_ context.Context, rule *domain.Rule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *rule
+	s.rules[rule.ID] = &cp
+	return nil
+}
+
+func (s *Store) DeleteRule(_ context.Context, accountID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.rules[id]
+	if !ok || r.AccountID != accountID {
+		return fmt.Errorf("rule not found")
+	}
+	delete(s.rules, id)
 	return nil
 }
