@@ -1,4 +1,5 @@
 FROM golang:1.25-alpine AS builder
+ARG VERSION=dev
 WORKDIR /src
 
 COPY gen/go.mod gen/go.sum ./gen/
@@ -12,7 +13,7 @@ COPY gen/ ./gen/
 COPY signal/ ./signal/
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=v${VERSION}" \
     -o /signal \
     ./signal/cmd/server
 

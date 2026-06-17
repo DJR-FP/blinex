@@ -1,4 +1,5 @@
 FROM golang:1.25-alpine AS builder
+ARG VERSION=dev
 WORKDIR /src
 
 # Copy only the modules needed for this binary
@@ -15,7 +16,7 @@ COPY gen/ ./gen/
 COPY management/ ./management/
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=v${VERSION}" \
     -o /management \
     ./management/cmd/server
 

@@ -13,11 +13,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var version = "dev"
+
 func main() {
 	cfgPath := flag.String("config", "", "path to agent config JSON (default: /etc/meshnet/agent.json)")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Info().Str("version", version).Msg("meshnet agent starting")
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

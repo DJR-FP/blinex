@@ -1,4 +1,5 @@
 FROM golang:1.25-alpine AS builder
+ARG VERSION=dev
 WORKDIR /src
 
 COPY relay/go.mod relay/go.sum ./relay/
@@ -10,7 +11,7 @@ RUN printf 'go 1.25\n\nuse (\n\t./relay\n)\n' > go.work && \
 COPY relay/ ./relay/
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=v${VERSION}" \
     -o /relay \
     ./relay/cmd/server
 

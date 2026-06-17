@@ -18,8 +18,12 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+// version is injected at build time via -ldflags "-X main.version=vX.Y.Z".
+var version = "dev"
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Info().Str("version", version).Msg("meshnet management starting")
 
 	cfg := config.Load()
 
@@ -47,7 +51,7 @@ func main() {
 	}
 
 	grpcSrv := grpcserver.New(st, authMgr, ipam, cfg.NetworkCIDR, cfg.DNSSuffix)
-	httpSrv := httpserver.New(st, authMgr, grpcSrv.NotifyAccount)
+	httpSrv := httpserver.New(st, authMgr, grpcSrv.NotifyAccount, version)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {

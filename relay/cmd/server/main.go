@@ -9,8 +9,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var version = "dev"
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Info().Str("version", version).Msg("meshnet relay starting")
 
 	cfg := server.Config{
 		PublicIP: getEnv("RELAY_PUBLIC_IP", "127.0.0.1"),

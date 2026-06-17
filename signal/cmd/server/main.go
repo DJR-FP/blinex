@@ -12,8 +12,11 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+var version = "dev"
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Info().Str("version", version).Msg("meshnet signal starting")
 
 	addr := getEnv("SIGNAL_ADDR", ":10000")
 

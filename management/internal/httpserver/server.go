@@ -15,13 +15,14 @@ import (
 )
 
 type Server struct {
-	store  store.Store
-	auth   *auth.Manager
-	router *gin.Engine
-	notify func(accountID string) // triggers gRPC sync push to all account peers
+	store   store.Store
+	auth    *auth.Manager
+	router  *gin.Engine
+	notify  func(accountID string) // triggers gRPC sync push to all account peers
+	version string
 }
 
-func New(st store.Store, authMgr *auth.Manager, notify func(string)) *Server {
+func New(st store.Store, authMgr *auth.Manager, notify func(string), version string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -35,7 +36,7 @@ func New(st store.Store, authMgr *auth.Manager, notify func(string)) *Server {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	s := &Server{store: st, auth: authMgr, router: r, notify: notify}
+	s := &Server{store: st, auth: authMgr, router: r, notify: notify, version: version}
 	s.registerRoutes()
 	return s
 }
@@ -64,7 +65,7 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "version": s.version})
 }
 
 func (s *Server) listPeers(c *gin.Context) {

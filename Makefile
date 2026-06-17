@@ -3,6 +3,8 @@ GOPATH   := $(HOME)/gopath
 GO       := $(GOROOT)/bin/go
 BUF      := $(GOPATH)/bin/buf
 BIN      := bin
+VERSION  := $(shell cat VERSION 2>/dev/null | tr -d '[:space:]' || echo dev)
+LDFLAGS  := -ldflags "-s -w -X main.version=v$(VERSION)"
 
 export PATH := $(GOROOT)/bin:$(GOPATH)/bin:$(PATH)
 
@@ -21,20 +23,20 @@ proto:
 build: build-management build-signal build-relay build-agent
 
 build-management:
-	$(GO) build -o $(BIN)/management ./management/cmd/server
-	@echo "✓ management built"
+	$(GO) build $(LDFLAGS) -o $(BIN)/management ./management/cmd/server
+	@echo "✓ management v$(VERSION) built"
 
 build-signal:
-	$(GO) build -o $(BIN)/signal ./signal/cmd/server
-	@echo "✓ signal built"
+	$(GO) build $(LDFLAGS) -o $(BIN)/signal ./signal/cmd/server
+	@echo "✓ signal v$(VERSION) built"
 
 build-relay:
-	$(GO) build -o $(BIN)/relay ./relay/cmd/server
-	@echo "✓ relay built"
+	$(GO) build $(LDFLAGS) -o $(BIN)/relay ./relay/cmd/server
+	@echo "✓ relay v$(VERSION) built"
 
 build-agent:
-	$(GO) build -o $(BIN)/agent ./client/cmd/agent
-	@echo "✓ agent built"
+	$(GO) build $(LDFLAGS) -o $(BIN)/agent ./client/cmd/agent
+	@echo "✓ agent v$(VERSION) built"
 
 ## ─── Test ───────────────────────────────────────────────────────────────────────
 
@@ -75,6 +77,14 @@ tidy:
 	$(GO) -C signal mod tidy
 	$(GO) -C relay mod tidy
 	$(GO) -C client mod tidy
+
+## ─── Release ─────────────────────────────────────────────────────────────────────
+
+# Create and push a version tag. Usage: make tag  (reads VERSION file)
+tag:
+	git tag -a v$(VERSION) -m "Release v$(VERSION)"
+	git push origin v$(VERSION)
+	@echo "✓ tagged v$(VERSION) and pushed"
 
 ## ─── Clean ───────────────────────────────────────────────────────────────────────
 
