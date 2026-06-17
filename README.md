@@ -1,6 +1,6 @@
 # Meshnet
 
-[![Version](https://img.shields.io/badge/version-v0.2.0-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.3.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml)
@@ -15,8 +15,9 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 - **Stable IPs** — every device gets a permanent CGNAT IP (`100.64.x.x`) and a Magic DNS hostname (`device.mesh`)
 - **TLS encrypted control plane** — management and signal servers are TLS by default; self-signed cert generated automatically if none is provided
 - **Exit node / subnet routing** — advertise a LAN subnet or full exit node through any mesh device; toggle per device in the dashboard
+- **Access control rules** — source/destination/protocol/port policy editor; rules pushed to agents and enforced with iptables
 - **Simple onboarding** — one `curl | bash` to enroll a device; JWT token appears in the dashboard
-- **Web dashboard** — manage devices, routes, setup keys from a browser
+- **Web dashboard** — manage devices, routes, access rules, and setup keys from a browser
 - **Self-hosted** — `docker compose up` and you own your data; no phone-home
 - **PostgreSQL or in-memory** — swap the store with one env var
 
@@ -61,7 +62,7 @@ Pre-built images are published to GitHub Container Registry. Every push to `main
 | Relay | `docker pull ghcr.io/djr-fp/overlay/relay:latest` |
 | Dashboard | `docker pull ghcr.io/djr-fp/overlay/dashboard:latest` |
 
-Pin a specific release: replace `:latest` with `:v0.2.0`.
+Pin a specific release: replace `:latest` with `:v0.3.0`.
 
 ---
 
@@ -248,6 +249,45 @@ Any mesh device can advertise subnets or act as a full exit node. Configuration 
 
 ---
 
+## Access Control Rules
+
+By default all enrolled devices can reach each other. Access rules let you restrict traffic by source, destination, protocol and port. Rules are evaluated in ascending priority order (lowest number first).
+
+### How it works
+
+1. Admin opens **Access Rules** in the dashboard → clicks **+ Add rule**
+2. Fills in source (IP, CIDR, or `*`), destination, protocol (`all`, `tcp`, `udp`, `icmp`), port (0 = any), action (`allow` / `deny`), and priority
+3. Management stores the rule and immediately pushes the full rule set to all connected agents via gRPC sync
+4. Each agent installs the rules into a dedicated `MESHNET-ACL` iptables chain (jumped from `INPUT` and `FORWARD`) — flush-and-reinstall on every update
+
+### REST API
+
+```
+GET    /api/v1/rules          list all rules for the account
+POST   /api/v1/rules          create a rule
+PUT    /api/v1/rules/:id      update a rule (partial — only sent fields are changed)
+DELETE /api/v1/rules/:id      delete a rule
+```
+
+### Example rule payload
+
+```json
+{
+  "name": "Block SSH from internet",
+  "src": "*",
+  "dst": "100.64.0.5",
+  "protocol": "tcp",
+  "port": 22,
+  "action": "deny",
+  "enabled": true,
+  "priority": 10
+}
+```
+
+> **Default policy:** if no rules are defined the default is allow-all. If any deny rule exists, an explicit `ACCEPT` is appended at the end of the chain so unmatched traffic is still allowed unless you add a catch-all deny rule.
+
+---
+
 ## How NAT Traversal Works
 
 Standard WireGuard uses a fixed UDP socket. STUN discovers the external address of that socket, but the port mapping often doesn't survive NAT — hole-punching fails.
@@ -275,17 +315,17 @@ The ICE-established connection *is* the WireGuard transport — no port mismatch
 
 The current version is stored in the [`VERSION`](VERSION) file. It is injected into every binary at build time and exposed at runtime via:
 
-- Startup log: `INFO meshnet management starting version=v0.2.0`
-- Health endpoint: `GET /api/v1/health` → `{"status":"ok","version":"v0.2.0"}`
+- Startup log: `INFO meshnet management starting version=v0.3.0`
+- Health endpoint: `GET /api/v1/health` → `{"status":"ok","version":"v0.3.0"}`
 
 To release a new version:
 
 ```bash
 # 1. Edit VERSION
-echo "0.3.0" > VERSION
+echo "0.4.0" > VERSION
 
 # 2. Commit
-git add VERSION && git commit -m "chore: bump to v0.3.0"
+git add VERSION && git commit -m "chore: bump to v0.4.0"
 
 # 3. Tag and push (triggers Docker image builds in CI)
 make tag
@@ -314,7 +354,7 @@ buf generate
 ### Next up
 - [ ] **Exit node OS routing** — automate policy routing on consuming peers so `0.0.0.0/0` routes work without manual setup
 - [ ] **OIDC / SSO login** — Google, GitHub OAuth2 as an alternative to setup key login
-- [ ] **Access control rules** — source/destination/protocol policy editor in the dashboard
+- [ ] **ACL groups** — tag-based policy (e.g. `tag:servers`) instead of individual IPs
 
 ### Planned
 - [ ] ICE restart on connection drop
@@ -322,9 +362,10 @@ buf generate
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
-- [x] TLS encryption on all control-plane connections (self-signed cert fallback)
-- [x] Exit node / subnet routing — dashboard toggle, WG AllowedIPs, OS routes, IP forwarding + masquerade
-- [x] Semantic versioning — `VERSION` file, ldflags injection, Docker image tags
+- [x] **Access control rules** — source/destination/protocol/port policy editor, iptables enforcement on agents (v0.3.0)
+- [x] TLS encryption on all control-plane connections (self-signed cert fallback) (v0.2.0)
+- [x] Exit node / subnet routing — dashboard toggle, WG AllowedIPs, OS routes, IP forwarding + masquerade (v0.2.0)
+- [x] Semantic versioning — `VERSION` file, ldflags injection, Docker image tags (v0.2.0)
 - [x] WireGuard mesh with ICE NAT traversal (STUN hole-punching + TURN relay fallback)
 - [x] CGNAT IP allocation (100.64.0.0/10) + Magic DNS (`hostname.mesh`)
 - [x] Management server — gRPC + REST API, JWT auth, CORS
