@@ -24,6 +24,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// exitNodeState holds the routing state installed when an exit node is active.
+type exitNodeState struct {
+	gwIP    net.IP
+	gwIface string
+	hostIPs []net.IP // management + signal IPs pinned via original gateway
+}
+
 // Engine orchestrates the agent.
 type Engine struct {
 	cfg           *config.Config
@@ -34,6 +41,7 @@ type Engine struct {
 	dns           *dns.Resolver
 	peers         *peer.Manager
 	appliedRoutes map[string][]string // peerKey → route CIDRs currently installed in OS
+	exitNode      *exitNodeState      // non-nil when exit node routing is active
 	ctx           context.Context
 }
 
@@ -200,6 +208,20 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
 	}
 
+	// Detect whether a peer (not ourselves) is advertising a default route.
+	hasExitNode := false
+	for _, r := range resp.Routes {
+		if r.Enabled && isDefaultRoute(r.Network) && r.Gateway != selfKey {
+			hasExitNode = true
+			break
+		}
+	}
+	if hasExitNode && e.exitNode == nil {
+		e.activateExitNode()
+	} else if !hasExitNode && e.exitNode != nil {
+		e.deactivateExitNode()
+	}
+
 	added, updated, removed := e.peers.Diff(resp.Peers)
 
 	for _, p := range added {
@@ -254,10 +276,95 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 	return nil
 }
 
+// activateExitNode sets up split-tunnel routing so all internet traffic flows
+// through the exit node peer while management/signal connections stay on the
+// original gateway.
+//
+// Instead of replacing the OS default route (which breaks the management
+// connection), we add two more-specific /1 routes via the WireGuard interface.
+// They cover all of 0.0.0.0/0 but leave the real default route in place.
+// Host /32 routes for the management and signal servers are pinned via the
+// original gateway so those connections always bypass the tunnel.
+func (e *Engine) activateExitNode() {
+	gwIP, gwIface, err := routing.GetDefaultGateway()
+	if err != nil {
+		log.Warn().Err(err).Msg("exit node: cannot determine default gateway — skipping OS route setup")
+		return
+	}
+
+	// Resolve management and signal server IPs to pin via original gateway.
+	var hostIPs []net.IP
+	for _, addr := range []string{e.cfg.ManagementURL, e.cfg.SignalURL} {
+		ip, err := resolveHost(addr)
+		if err != nil {
+			log.Warn().Err(err).Str("addr", addr).Msg("exit node: cannot resolve host — not pinning")
+			continue
+		}
+		if ip.IsLoopback() {
+			continue // localhost never routes through the tunnel anyway
+		}
+		if err := routing.AddHostRoute(ip, gwIP, gwIface); err != nil {
+			log.Warn().Err(err).Str("ip", ip.String()).Msg("exit node: pin host route failed")
+			continue
+		}
+		hostIPs = append(hostIPs, ip)
+		log.Debug().Str("ip", ip.String()).Str("gw", gwIP.String()).Msg("exit node: pinned host route")
+	}
+
+	// Two /1 routes cover all of IPv4 and are more specific than the /0
+	// default, so they win in the routing table without replacing it.
+	for _, cidr := range []string{"0.0.0.0/1", "128.0.0.0/1"} {
+		if err := routing.AddRoute(cidr, e.cfg.WGInterface); err != nil {
+			log.Warn().Err(err).Str("cidr", cidr).Msg("exit node: add split route failed")
+		}
+	}
+
+	e.exitNode = &exitNodeState{gwIP: gwIP, gwIface: gwIface, hostIPs: hostIPs}
+	log.Info().Str("gateway", gwIP.String()).Str("iface", gwIface).Msg("exit node routing activated")
+}
+
+// deactivateExitNode tears down split-tunnel routing installed by activateExitNode.
+func (e *Engine) deactivateExitNode() {
+	if e.exitNode == nil {
+		return
+	}
+	for _, cidr := range []string{"0.0.0.0/1", "128.0.0.0/1"} {
+		routing.RemoveRoute(cidr, e.cfg.WGInterface)
+	}
+	for _, ip := range e.exitNode.hostIPs {
+		routing.RemoveHostRoute(ip, e.exitNode.gwIface)
+	}
+	e.exitNode = nil
+	log.Info().Msg("exit node routing deactivated")
+}
+
+// resolveHost extracts the host from a host:port address and resolves it to an IP.
+func resolveHost(addr string) (net.IP, error) {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.To4(), nil
+	}
+	ips, err := net.LookupHost(host)
+	if err != nil || len(ips) == 0 {
+		return nil, fmt.Errorf("resolve %q: %w", host, err)
+	}
+	// Prefer IPv4.
+	for _, s := range ips {
+		if ip := net.ParseIP(s); ip != nil {
+			if v4 := ip.To4(); v4 != nil {
+				return v4, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no IPv4 address for %q", host)
+}
+
 // applyOSRoutes diffs old vs new route CIDRs for a peer and updates the OS
-// routing table. Default routes (0.0.0.0/0) are handled at the WireGuard
-// AllowedIPs level only — OS-level default route changes require policy routing
-// and are left to the operator.
+// routing table. Default routes (0.0.0.0/0) are handled via activateExitNode /
+// deactivateExitNode — this function skips them.
 func (e *Engine) applyOSRoutes(peerKey string, oldRoutes, newRoutes []string) {
 	for _, cidr := range diffRemoved(oldRoutes, newRoutes) {
 		if isDefaultRoute(cidr) {

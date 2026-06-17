@@ -1,6 +1,6 @@
 # Meshnet
 
-[![Version](https://img.shields.io/badge/version-v0.3.0-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.4.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml)
@@ -243,9 +243,18 @@ Any mesh device can advertise subnets or act as a full exit node. Configuration 
 | Advertised CIDR | `0.0.0.0/0` | e.g. `192.168.1.0/24` |
 | Effect on other peers | All internet traffic routed through this device | Only traffic for that subnet routed through this device |
 | Gateway setup | IP forwarding + masquerade | IP forwarding + masquerade |
-| OS route on consumers | Manual (policy routing required) | Added automatically via netlink |
+| OS route on consumers | Automatic — split-tunnel /1 routes via WireGuard | Added automatically via netlink |
 
-> **Exit node note:** WireGuard `AllowedIPs = 0.0.0.0/0` is set correctly on consuming peers, but OS default-route changes require policy routing to avoid breaking the management connection. This is left to the operator for now and is on the roadmap to automate.
+### Exit node split-tunnel routing
+
+When a peer becomes active as an exit node, consuming peers automatically:
+
+1. Read the current default gateway IP and interface before touching any routes
+2. Add `/32` host routes for the management and signal servers via the original gateway — so control-plane connections always bypass the tunnel
+3. Add `0.0.0.0/1` and `128.0.0.0/1` routes via the WireGuard interface — these are more specific than the existing `/0` default route and win in the routing table without replacing it
+4. On exit node removal, all routes are cleanly torn down and the host pins are removed
+
+This means the management connection is never interrupted, even when a full exit node is active.
 
 ---
 
@@ -315,17 +324,17 @@ The ICE-established connection *is* the WireGuard transport — no port mismatch
 
 The current version is stored in the [`VERSION`](VERSION) file. It is injected into every binary at build time and exposed at runtime via:
 
-- Startup log: `INFO meshnet management starting version=v0.3.0`
-- Health endpoint: `GET /api/v1/health` → `{"status":"ok","version":"v0.3.0"}`
+- Startup log: `INFO meshnet management starting version=v0.4.0`
+- Health endpoint: `GET /api/v1/health` → `{"status":"ok","version":"v0.4.0"}`
 
 To release a new version:
 
 ```bash
 # 1. Edit VERSION
-echo "0.4.0" > VERSION
+echo "0.5.0" > VERSION
 
 # 2. Commit
-git add VERSION && git commit -m "chore: bump to v0.4.0"
+git add VERSION && git commit -m "chore: bump to v0.5.0"
 
 # 3. Tag and push (triggers Docker image builds in CI)
 make tag
@@ -352,9 +361,9 @@ buf generate
 ## Roadmap
 
 ### Next up
-- [ ] **Exit node OS routing** — automate policy routing on consuming peers so `0.0.0.0/0` routes work without manual setup
 - [ ] **OIDC / SSO login** — Google, GitHub OAuth2 as an alternative to setup key login
 - [ ] **ACL groups** — tag-based policy (e.g. `tag:servers`) instead of individual IPs
+- [ ] **ICE restart** — reconnect peers automatically on connection drop without agent restart
 
 ### Planned
 - [ ] ICE restart on connection drop
@@ -362,6 +371,7 @@ buf generate
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
+- [x] **Exit node OS routing** — split-tunnel /1 routes + host-route pinning for management/signal; no manual policy routing needed (v0.4.0)
 - [x] **Access control rules** — source/destination/protocol/port policy editor, iptables enforcement on agents (v0.3.0)
 - [x] TLS encryption on all control-plane connections (self-signed cert fallback) (v0.2.0)
 - [x] Exit node / subnet routing — dashboard toggle, WG AllowedIPs, OS routes, IP forwarding + masquerade (v0.2.0)

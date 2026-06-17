@@ -70,3 +70,51 @@ func RemoveRoute(cidr, iface string) {
 		Dst:       dst,
 	})
 }
+
+// GetDefaultGateway returns the IPv4 default route's gateway IP and interface name.
+func GetDefaultGateway() (net.IP, string, error) {
+	routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, "", fmt.Errorf("listing routes: %w", err)
+	}
+	for _, r := range routes {
+		if r.Dst == nil && r.Gw != nil {
+			link, err := netlink.LinkByIndex(r.LinkIndex)
+			if err != nil {
+				return nil, "", fmt.Errorf("resolving link index %d: %w", r.LinkIndex, err)
+			}
+			return r.Gw, link.Attrs().Name, nil
+		}
+	}
+	return nil, "", fmt.Errorf("no default gateway found")
+}
+
+// AddHostRoute installs a /32 host route for ip via gwIP on the named interface.
+// Used to pin management/signal server traffic to the original gateway when an
+// exit node route is active.
+func AddHostRoute(ip, gwIP net.IP, ifaceName string) error {
+	link, err := netlink.LinkByName(ifaceName)
+	if err != nil {
+		return fmt.Errorf("link %q: %w", ifaceName, err)
+	}
+	dst := &net.IPNet{IP: ip.To4(), Mask: net.CIDRMask(32, 32)}
+	return netlink.RouteReplace(&netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Dst:       dst,
+		Gw:        gwIP,
+	})
+}
+
+// RemoveHostRoute removes the /32 host route for ip on the named interface.
+// Best-effort; errors are silently ignored.
+func RemoveHostRoute(ip net.IP, ifaceName string) {
+	link, err := netlink.LinkByName(ifaceName)
+	if err != nil {
+		return
+	}
+	dst := &net.IPNet{IP: ip.To4(), Mask: net.CIDRMask(32, 32)}
+	netlink.RouteDel(&netlink.Route{ //nolint:errcheck
+		LinkIndex: link.Attrs().Index,
+		Dst:       dst,
+	})
+}
