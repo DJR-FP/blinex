@@ -4,12 +4,15 @@ import (
 	"net"
 	"os"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/reflection"
+
 	signalv1 "github.com/meshnet/gen/signal/v1"
 	"github.com/meshnet/signal/internal/server"
+	"github.com/meshnet/signal/internal/tlsconfig"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 )
 
 var version = "dev"
@@ -20,16 +23,27 @@ func main() {
 
 	addr := getEnv("SIGNAL_ADDR", ":10000")
 
+	tlsCfg, selfSigned, err := tlsconfig.Load(
+		getEnv("TLS_CERT_FILE", ""),
+		getEnv("TLS_KEY_FILE", ""),
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("TLS setup failed")
+	}
+	if selfSigned {
+		log.Warn().Msg("using self-signed TLS certificate — set TLS_CERT_FILE + TLS_KEY_FILE for production")
+	}
+
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal().Err(err).Str("addr", addr).Msg("failed to listen")
 	}
 
-	s := grpc.NewServer()
+	s := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
 	signalv1.RegisterSignalServiceServer(s, server.New())
 	reflection.Register(s)
 
-	log.Info().Str("addr", addr).Msg("signal server starting")
+	log.Info().Str("addr", addr).Msg("gRPC/TLS signal server starting")
 	if err := s.Serve(lis); err != nil {
 		log.Fatal().Err(err).Msg("signal server error")
 	}

@@ -14,6 +14,8 @@ type Config struct {
 	DNSSuffix   string
 	DatabaseURL string // postgres DSN; empty = in-memory store
 	DefaultKey  string // seed setup key value
+	TLSCertFile string // path to TLS certificate PEM; empty = self-signed
+	TLSKeyFile  string // path to TLS private key PEM; empty = self-signed
 }
 
 func Load() *Config {
@@ -26,6 +28,8 @@ func Load() *Config {
 		DNSSuffix:   getEnv("MGMT_DNS_SUFFIX", "mesh"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		DefaultKey:  getEnv("MESHNET_DEFAULT_KEY", "MESHNET-DEFAULT-KEY"),
+		TLSCertFile: getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:  getEnv("TLS_KEY_FILE", ""),
 	}
 }
 

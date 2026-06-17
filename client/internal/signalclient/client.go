@@ -2,13 +2,14 @@ package signalclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 
 	signalv1 "github.com/meshnet/gen/signal/v1"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 // Client wraps the SignalService bidirectional stream.
@@ -19,8 +20,8 @@ type Client struct {
 	selfKey string
 }
 
-func New(serverAddr, selfWGKey string) (*Client, error) {
-	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func New(serverAddr, selfWGKey string, tlsCfg *tls.Config) (*Client, error) {
+	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	if err != nil {
 		return nil, fmt.Errorf("dial signal server: %w", err)
 	}

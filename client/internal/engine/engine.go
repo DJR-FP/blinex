@@ -43,18 +43,26 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("state: %w", err)
 	}
 
+	tlsCfg, err := cfg.TLSConfig()
+	if err != nil {
+		return nil, fmt.Errorf("TLS config: %w", err)
+	}
+	if cfg.TLSSkipVerify && cfg.TLSCACert == "" {
+		log.Warn().Msg("TLS skip-verify enabled — server certificate is not validated (default for self-signed certs)")
+	}
+
 	wg, err := wgmgr.New(cfg.WGInterface, privKey)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: %w", err)
 	}
 
-	mgm, err := mgmclient.New(cfg.ManagementURL)
+	mgm, err := mgmclient.New(cfg.ManagementURL, tlsCfg)
 	if err != nil {
 		wg.Close()
 		return nil, fmt.Errorf("management client: %w", err)
 	}
 
-	sig, err := signalclient.New(cfg.SignalURL, wg.PublicKey())
+	sig, err := signalclient.New(cfg.SignalURL, wg.PublicKey(), tlsCfg)
 	if err != nil {
 		_ = wg.Close()
 		_ = mgm.Close()

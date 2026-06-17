@@ -2,12 +2,13 @@ package mgmclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 
-	managementv1 "github.com/meshnet/gen/management/v1"
 	commonv1 "github.com/meshnet/gen/common/v1"
+	managementv1 "github.com/meshnet/gen/management/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 // Client wraps the ManagementService gRPC client.
@@ -16,8 +17,8 @@ type Client struct {
 	rpc  managementv1.ManagementServiceClient
 }
 
-func New(serverAddr string) (*Client, error) {
-	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func New(serverAddr string, tlsCfg *tls.Config) (*Client, error) {
+	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	if err != nil {
 		return nil, fmt.Errorf("dial management server: %w", err)
 	}

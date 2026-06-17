@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -41,9 +43,13 @@ func New(st store.Store, authMgr *auth.Manager, notify func(string), version str
 	return s
 }
 
-func (s *Server) Run(addr string) error {
-	log.Info().Str("addr", addr).Msg("HTTP server starting")
-	return s.router.Run(addr)
+func (s *Server) Run(addr string, tlsCfg *tls.Config) error {
+	ln, err := tls.Listen("tcp", addr, tlsCfg)
+	if err != nil {
+		return fmt.Errorf("TLS listen on %s: %w", addr, err)
+	}
+	log.Info().Str("addr", addr).Msg("HTTPS server starting")
+	return (&http.Server{Handler: s.router}).Serve(ln)
 }
 
 func (s *Server) registerRoutes() {
