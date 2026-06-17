@@ -16,6 +16,7 @@ import (
 	"github.com/meshnet/client/internal/ice"
 	"github.com/meshnet/client/internal/mgmclient"
 	"github.com/meshnet/client/internal/peer"
+	"github.com/meshnet/client/internal/routing"
 	"github.com/meshnet/client/internal/signalclient"
 	"github.com/meshnet/client/internal/state"
 	"github.com/meshnet/client/internal/wgmgr"
@@ -24,14 +25,15 @@ import (
 
 // Engine orchestrates the agent.
 type Engine struct {
-	cfg   *config.Config
-	wg    *wgmgr.Manager
-	mgm   *mgmclient.Client
-	sig   *signalclient.Client
-	ice   *ice.Manager
-	dns   *dns.Resolver
-	peers *peer.Manager
-	ctx   context.Context
+	cfg           *config.Config
+	wg            *wgmgr.Manager
+	mgm           *mgmclient.Client
+	sig           *signalclient.Client
+	ice           *ice.Manager
+	dns           *dns.Resolver
+	peers         *peer.Manager
+	appliedRoutes map[string][]string // peerKey → route CIDRs currently installed in OS
+	ctx           context.Context
 }
 
 // New creates an Engine. Loads or generates the WireGuard private key from state.
@@ -63,13 +65,14 @@ func New(cfg *config.Config) (*Engine, error) {
 	dnsResolver := dns.New("127.0.0.1:53535", "mesh", "8.8.8.8:53")
 
 	return &Engine{
-		cfg:   cfg,
-		wg:    wg,
-		mgm:   mgm,
-		sig:   sig,
-		ice:   iceMgr,
-		dns:   dnsResolver,
-		peers: peer.New(),
+		cfg:           cfg,
+		wg:            wg,
+		mgm:           mgm,
+		sig:           sig,
+		ice:           iceMgr,
+		dns:           dnsResolver,
+		peers:         peer.New(),
+		appliedRoutes: make(map[string][]string),
 	}, nil
 }
 
@@ -167,19 +170,42 @@ func (e *Engine) enrollWithRetry(ctx context.Context, meta *commonv1.PeerMeta) (
 }
 
 func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
-	added, updated, removed := e.peers.Diff(resp.Peers)
 	selfKey := e.wg.PublicKey()
+
+	// Build gateway → route CIDRs map from this sync response.
+	routesByGateway := make(map[string][]string)
+	for _, r := range resp.Routes {
+		if r.Enabled {
+			routesByGateway[r.Gateway] = append(routesByGateway[r.Gateway], r.Network)
+		}
+	}
+
+	// If we are the gateway for any route, set up IP forwarding + masquerade.
+	if selfRoutes := routesByGateway[selfKey]; len(selfRoutes) > 0 {
+		if err := routing.EnableForwarding(); err != nil {
+			log.Warn().Err(err).Msg("failed to enable IP forwarding")
+		}
+		if err := routing.AddMasquerade(); err != nil {
+			log.Warn().Err(err).Msg("failed to add iptables masquerade")
+		}
+		log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
+	}
+
+	added, updated, removed := e.peers.Diff(resp.Peers)
 
 	for _, p := range added {
 		if p.WgPubKey == selfKey {
 			continue
 		}
+		// AllowedIps already includes any advertised route CIDRs (set by management).
 		if err := e.wg.UpsertPeer(p.WgPubKey, p.AllowedIps, ""); err != nil {
 			log.Warn().Err(err).Str("peer", p.Id).Msg("add peer failed")
 		}
+		e.applyOSRoutes(p.WgPubKey, nil, routesByGateway[p.WgPubKey])
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 		e.ice.StartConnect(e.ctx, p.WgPubKey)
-		log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Msg("peer added, ICE starting")
+		log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).
+			Strs("routes", routesByGateway[p.WgPubKey]).Msg("peer added, ICE starting")
 	}
 
 	for _, p := range updated {
@@ -189,6 +215,7 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		if err := e.wg.UpsertPeer(p.WgPubKey, p.AllowedIps, ""); err != nil {
 			log.Warn().Err(err).Str("peer", p.Id).Msg("update peer failed")
 		}
+		e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], routesByGateway[p.WgPubKey])
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 	}
 
@@ -199,12 +226,73 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		if err := e.wg.RemovePeer(p.WgPubKey); err != nil {
 			log.Warn().Err(err).Str("peer", p.Id).Msg("remove peer failed")
 		}
+		e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], nil)
+		delete(e.appliedRoutes, p.WgPubKey)
 		e.dns.Remove(p.DnsLabel)
 		e.ice.ClosePeer(p.WgPubKey)
 		log.Info().Str("peer", p.Hostname).Msg("peer removed")
 	}
 
 	return nil
+}
+
+// applyOSRoutes diffs old vs new route CIDRs for a peer and updates the OS
+// routing table. Default routes (0.0.0.0/0) are handled at the WireGuard
+// AllowedIPs level only — OS-level default route changes require policy routing
+// and are left to the operator.
+func (e *Engine) applyOSRoutes(peerKey string, oldRoutes, newRoutes []string) {
+	for _, cidr := range diffRemoved(oldRoutes, newRoutes) {
+		if isDefaultRoute(cidr) {
+			continue
+		}
+		routing.RemoveRoute(cidr, e.cfg.WGInterface)
+		log.Debug().Str("cidr", cidr).Msg("OS route removed")
+	}
+	for _, cidr := range diffAdded(oldRoutes, newRoutes) {
+		if isDefaultRoute(cidr) {
+			continue // operator must configure policy routing for exit nodes
+		}
+		if err := routing.AddRoute(cidr, e.cfg.WGInterface); err != nil {
+			log.Warn().Err(err).Str("cidr", cidr).Msg("failed to add OS route")
+		} else {
+			log.Info().Str("cidr", cidr).Str("iface", e.cfg.WGInterface).Msg("OS route added")
+		}
+	}
+	if newRoutes != nil {
+		e.appliedRoutes[peerKey] = newRoutes
+	}
+}
+
+func isDefaultRoute(cidr string) bool {
+	return cidr == "0.0.0.0/0" || cidr == "::/0"
+}
+
+func diffRemoved(old, new []string) []string {
+	newSet := make(map[string]bool, len(new))
+	for _, s := range new {
+		newSet[s] = true
+	}
+	var out []string
+	for _, s := range old {
+		if !newSet[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func diffAdded(old, new []string) []string {
+	oldSet := make(map[string]bool, len(old))
+	for _, s := range old {
+		oldSet[s] = true
+	}
+	var out []string
+	for _, s := range new {
+		if !oldSet[s] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func shortKey(k string) string {

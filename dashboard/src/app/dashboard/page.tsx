@@ -37,6 +37,13 @@ export default function DevicesPage() {
     setPeers(prev => prev.filter(p => p.wg_pub_key !== key))
   }
 
+  const handleRoutesChange = async (key: string, routes: string[]) => {
+    const token = getToken()
+    if (!token) return
+    const resp = await api.peers.setRoutes(token, key, routes)
+    setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, advertised_routes: routes, ...resp.peer } : p))
+  }
+
   const connected = peers.filter(p => p.connected).length
 
   const installCmd = `curl -fsSL https://install.meshnet.io/agent | MESHNET_SETUP_KEY=<your-key> bash`
@@ -100,7 +107,7 @@ export default function DevicesPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {peers.map(p => (
-          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} />
+          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} />
         ))}
       </div>
     </div>

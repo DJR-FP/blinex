@@ -32,18 +32,19 @@ type setupKey struct {
 }
 
 type peer struct {
-	ID         string    `gorm:"primaryKey"`
-	AccountID  string    `gorm:"index"`
-	WGPubKey   string    `gorm:"uniqueIndex"`
-	IP         string
-	Hostname   string
-	OS         string
-	Kernel     string
-	DNSLabel   string
-	AllowedIPs string // comma-separated
-	Connected  bool
-	LastSeen   time.Time
-	CreatedAt  time.Time
+	ID               string    `gorm:"primaryKey"`
+	AccountID        string    `gorm:"index"`
+	WGPubKey         string    `gorm:"uniqueIndex"`
+	IP               string
+	Hostname         string
+	OS               string
+	Kernel           string
+	DNSLabel         string
+	AllowedIPs       string // comma-separated
+	AdvertisedRoutes string // comma-separated CIDRs
+	Connected        bool
+	LastSeen         time.Time
+	CreatedAt        time.Time
 }
 
 // Store ———————————————————————————————————————————————————————————————————————
@@ -170,18 +171,19 @@ func (s *Store) GetPeersByAccount(_ context.Context, accountID string) ([]*domai
 
 func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 	return s.db.Save(&peer{
-		ID:         dp.ID,
-		AccountID:  dp.AccountID,
-		WGPubKey:   dp.WGPubKey,
-		IP:         dp.IP,
-		Hostname:   dp.Hostname,
-		OS:         dp.OS,
-		Kernel:     dp.Kernel,
-		DNSLabel:   dp.DNSLabel,
-		AllowedIPs: joinIPs(dp.AllowedIPs),
-		Connected:  dp.Connected,
-		LastSeen:   dp.LastSeen,
-		CreatedAt:  dp.CreatedAt,
+		ID:               dp.ID,
+		AccountID:        dp.AccountID,
+		WGPubKey:         dp.WGPubKey,
+		IP:               dp.IP,
+		Hostname:         dp.Hostname,
+		OS:               dp.OS,
+		Kernel:           dp.Kernel,
+		DNSLabel:         dp.DNSLabel,
+		AllowedIPs:       joinIPs(dp.AllowedIPs),
+		AdvertisedRoutes: joinIPs(dp.AdvertisedRoutes),
+		Connected:        dp.Connected,
+		LastSeen:         dp.LastSeen,
+		CreatedAt:        dp.CreatedAt,
 	}).Error
 }
 
@@ -206,18 +208,19 @@ func toDomainSetupKey(sk *setupKey) *domain.SetupKey {
 
 func toDomainPeer(p *peer) *domain.Peer {
 	return &domain.Peer{
-		ID:         p.ID,
-		AccountID:  p.AccountID,
-		WGPubKey:   p.WGPubKey,
-		IP:         p.IP,
-		Hostname:   p.Hostname,
-		OS:         p.OS,
-		Kernel:     p.Kernel,
-		DNSLabel:   p.DNSLabel,
-		AllowedIPs: splitIPs(p.AllowedIPs),
-		Connected:  p.Connected,
-		LastSeen:   p.LastSeen,
-		CreatedAt:  p.CreatedAt,
+		ID:               p.ID,
+		AccountID:        p.AccountID,
+		WGPubKey:         p.WGPubKey,
+		IP:               p.IP,
+		Hostname:         p.Hostname,
+		OS:               p.OS,
+		Kernel:           p.Kernel,
+		DNSLabel:         p.DNSLabel,
+		AllowedIPs:       splitIPs(p.AllowedIPs),
+		AdvertisedRoutes: splitIPs(p.AdvertisedRoutes),
+		Connected:        p.Connected,
+		LastSeen:         p.LastSeen,
+		CreatedAt:        p.CreatedAt,
 	}
 }
 

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"net"
 	"net/http"
 	"time"
 
@@ -17,9 +18,10 @@ type Server struct {
 	store  store.Store
 	auth   *auth.Manager
 	router *gin.Engine
+	notify func(accountID string) // triggers gRPC sync push to all account peers
 }
 
-func New(st store.Store, authMgr *auth.Manager) *Server {
+func New(st store.Store, authMgr *auth.Manager, notify func(string)) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -33,7 +35,7 @@ func New(st store.Store, authMgr *auth.Manager) *Server {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	s := &Server{store: st, auth: authMgr, router: r}
+	s := &Server{store: st, auth: authMgr, router: r, notify: notify}
 	s.registerRoutes()
 	return s
 }
@@ -53,6 +55,7 @@ func (s *Server) registerRoutes() {
 	// Peers
 	auth.GET("/peers", s.listPeers)
 	auth.DELETE("/peers/:key", s.deletePeer)
+	auth.PUT("/peers/:key/routes", s.setPeerRoutes)
 
 	// Setup keys
 	auth.GET("/setup-keys", s.listSetupKeys)
@@ -81,6 +84,49 @@ func (s *Server) deletePeer(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) setPeerRoutes(c *gin.Context) {
+	var req struct {
+		Routes []string `json:"routes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate each CIDR.
+	for _, r := range req.Routes {
+		if _, _, err := net.ParseCIDR(r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid CIDR: " + r})
+			return
+		}
+	}
+
+	key := c.Param("key")
+	claims := claimsFromCtx(c)
+
+	peer, err := s.store.GetPeer(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "peer not found"})
+		return
+	}
+	if peer.AccountID != claims.AccountID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	peer.AdvertisedRoutes = req.Routes
+	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if s.notify != nil {
+		s.notify(peer.AccountID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"peer": peer})
 }
 
 func (s *Server) listSetupKeys(c *gin.Context) {

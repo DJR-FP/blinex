@@ -10,6 +10,7 @@ export interface Peer {
   connected: boolean
   last_seen: string
   created_at: string
+  advertised_routes?: string[]
 }
 
 export interface SetupKey {
@@ -49,6 +50,11 @@ export const api = {
       request<{ peers: Peer[] }>('/peers', token),
     delete: (token: string, key: string) =>
       request<void>(`/peers/${encodeURIComponent(key)}`, token, { method: 'DELETE' }),
+    setRoutes: (token: string, key: string, routes: string[]) =>
+      request<{ peer: Peer }>(`/peers/${encodeURIComponent(key)}/routes`, token, {
+        method: 'PUT',
+        body: JSON.stringify({ routes }),
+      }),
   },
   setupKeys: {
     list: (token: string) =>

@@ -32,7 +32,7 @@ func (m *Manager) Diff(incoming []*commonv1.Peer) (added, updated, removed []*co
 	for _, p := range incoming {
 		if existing, ok := m.peers[p.WgPubKey]; !ok {
 			added = append(added, p)
-		} else if existing.Ip != p.Ip || existing.Hostname != p.Hostname {
+		} else if existing.Ip != p.Ip || existing.Hostname != p.Hostname || !allowedIPsEqual(existing.AllowedIps, p.AllowedIps) {
 			updated = append(updated, p)
 		}
 	}
@@ -54,6 +54,18 @@ func (m *Manager) Diff(incoming []*commonv1.Peer) (added, updated, removed []*co
 		Msg("peer diff")
 
 	return added, updated, removed
+}
+
+func allowedIPsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) All() []*commonv1.Peer {

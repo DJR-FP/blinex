@@ -3,16 +3,17 @@ package domain
 import "time"
 
 type Peer struct {
-	ID         string
-	AccountID  string
-	WGPubKey   string // base64 WireGuard public key
-	IP         string // assigned CGNAT IP, e.g. "100.64.0.5"
-	Hostname   string
-	OS         string
-	Kernel     string
-	DNSLabel   string // slug used in Magic DNS, e.g. "laptop"
-	AllowedIPs []string
-	Connected  bool
-	LastSeen   time.Time
-	CreatedAt  time.Time
+	ID               string    `json:"id"`
+	AccountID        string    `json:"account_id"`
+	WGPubKey         string    `json:"wg_pub_key"`
+	IP               string    `json:"ip"`
+	Hostname         string    `json:"hostname"`
+	OS               string    `json:"os"`
+	Kernel           string    `json:"kernel"`
+	DNSLabel         string    `json:"dns_label"`
+	AllowedIPs       []string  `json:"allowed_ips"`
+	AdvertisedRoutes []string  `json:"advertised_routes"` // CIDRs this peer advertises to the mesh
+	Connected        bool      `json:"connected"`
+	LastSeen         time.Time `json:"last_seen"`
+	CreatedAt        time.Time `json:"created_at"`
 }

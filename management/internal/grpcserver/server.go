@@ -183,21 +183,46 @@ func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePee
 
 func (s *Server) buildSyncResponse(peers []*domain.Peer) *managementv1.SyncResponse {
 	var pbPeers []*commonv1.Peer
+	var routes []*commonv1.Route
+
 	for _, p := range peers {
+		// Merge peer CGNAT IP and any advertised routes into AllowedIps so
+		// receiving agents configure WireGuard with the correct allowed-IP set.
+		allowedIPs := make([]string, 0, len(p.AllowedIPs)+len(p.AdvertisedRoutes))
+		allowedIPs = append(allowedIPs, p.AllowedIPs...)
+		allowedIPs = append(allowedIPs, p.AdvertisedRoutes...)
+
 		pbPeers = append(pbPeers, &commonv1.Peer{
 			Id:         p.ID,
 			WgPubKey:   p.WGPubKey,
 			Ip:         p.IP,
 			Hostname:   p.Hostname,
 			Os:         p.OS,
-			AllowedIps: p.AllowedIPs,
+			AllowedIps: allowedIPs,
 			DnsLabel:   p.DNSLabel,
 		})
+
+		for i, cidr := range p.AdvertisedRoutes {
+			routes = append(routes, &commonv1.Route{
+				Id:      fmt.Sprintf("%s:%d", p.WGPubKey, i),
+				Network: cidr,
+				Gateway: p.WGPubKey,
+				Metric:  100,
+				Enabled: true,
+			})
+		}
 	}
+
 	return &managementv1.SyncResponse{
 		Peers:  pbPeers,
+		Routes: routes,
 		Serial: fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
+}
+
+// NotifyAccount triggers a sync push to all connected peers in the account.
+func (s *Server) NotifyAccount(accountID string) {
+	s.notifyAll(accountID)
 }
 
 func (s *Server) notifyAll(accountID string) {
