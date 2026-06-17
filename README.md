@@ -206,13 +206,25 @@ buf generate
 
 ## Roadmap
 
+### Next up
+- [ ] **Subnet routing & exit node** — advertise a LAN subnet (`192.168.x.x/24`) or full exit node (`0.0.0.0/0`) through a mesh peer. Requires: route advertisement at enrollment, distributing routes via `SyncResponse.routes` (proto field already exists), applying `AllowedIPs` on peers, IP forwarding + NAT masquerade on the advertising device, and a dashboard toggle per device.
+
+### Planned
 - [ ] OIDC / SSO login (Google, GitHub)
 - [ ] Access control rule editor in dashboard
-- [ ] Exit node / subnet routing
 - [ ] ICE restart on connection drop
 - [ ] iOS + Android clients (wireguard-go + pion/ice)
 - [ ] Kubernetes Helm chart
-- [ ] GitHub Actions CI
+
+### Done ✅
+- [x] WireGuard mesh with ICE NAT traversal (STUN hole-punching + TURN relay fallback)
+- [x] CGNAT IP allocation (100.64.0.0/10) + Magic DNS (`hostname.mesh`)
+- [x] Management server — gRPC + REST API, JWT auth, CORS
+- [x] PostgreSQL store (GORM) with in-memory fallback
+- [x] Setup keys — create, list, revoke via dashboard
+- [x] Web dashboard — devices, setup keys, settings (Next.js 14)
+- [x] Docker images published to GHCR
+- [x] GitHub Actions CI — auto-build & push on every commit
 
 ---
 
