@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/meshnet/gen/common/v1;commonv1";
+
+message Peer {
+  string id          = 1;
+  string wg_pub_key  = 2;
+  string ip          = 3;
+  string hostname    = 4;
+  string os          = 5;
+  repeated string allowed_ips = 6;
+  string dns_label   = 7; // e.g. "laptop" in laptop.alice.mesh
+}
+
+message PeerMeta {
+  string hostname     = 1;
+  string os           = 2;
+  string kernel       = 3;
+  string core_version = 4;
+}
+
+message NetworkConfig {
+  string address    = 1; // CIDR assigned to this peer, e.g. 100.64.0.5/32
+  string network    = 2; // full mesh network CIDR, e.g. 100.64.0.0/10
+  int32  dns_port   = 3;
+  string serial     = 4; // monotonic update counter
+}
+
+message Route {
+  string id      = 1;
+  string network = 2; // CIDR to route, e.g. 192.168.1.0/24
+  string gateway = 3; // WireGuard pubkey of the routing peer
+  int32  metric  = 4;
+  bool   enabled = 5;
+}
+
+message DNSConfig {
+  repeated string      domains        = 1;
+  repeated string      search_domains = 2;
+  repeated NameServer  name_servers   = 3;
+}
+
+message NameServer {
+  string ip         = 1;
+  int32  port       = 2;
+  bool   is_primary = 3;
+}

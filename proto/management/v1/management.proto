@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package management.v1;
+
+import "common/v1/types.proto";
+
+option go_package = "github.com/meshnet/gen/management/v1;managementv1";
+
+service ManagementService {
+  // Pre-auth: fetch the server's WireGuard public key.
+  rpc GetServerKey(GetServerKeyRequest) returns (GetServerKeyResponse);
+
+  // Enroll a new peer using a setup key. Returns the assigned IP and config.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // Long-lived server-streaming RPC. Server pushes peer-list and config
+  // updates to the client whenever the network state changes.
+  rpc Sync(SyncRequest) returns (stream SyncResponse);
+
+  // Called by the agent after OS/version changes.
+  rpc UpdatePeerMeta(UpdatePeerMetaRequest) returns (UpdatePeerMetaResponse);
+}
+
+message GetServerKeyRequest {}
+
+message GetServerKeyResponse {
+  string key = 1;
+}
+
+message LoginRequest {
+  string         setup_key  = 1; // pre-shared enrollment key
+  string         wg_pub_key = 2; // device's WireGuard public key
+  common.v1.PeerMeta meta   = 3;
+}
+
+message LoginResponse {
+  common.v1.NetworkConfig network_config = 1;
+  string                  peer_id        = 2;
+  string                  token          = 3; // JWT for REST API calls
+}
+
+message SyncRequest {
+  string wg_pub_key = 1;
+}
+
+message SyncResponse {
+  repeated common.v1.Peer      peers      = 1;
+  repeated common.v1.Route     routes     = 2;
+  common.v1.NetworkConfig      network    = 3;
+  common.v1.DNSConfig          dns_config = 4;
+  string                       serial     = 5; // monotonic, client caches this
+}
+
+message UpdatePeerMetaRequest {
+  string             wg_pub_key = 1;
+  common.v1.PeerMeta meta       = 2;
+}
+
+message UpdatePeerMetaResponse {}

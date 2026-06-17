@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: meshnet
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-meshnet-secret}"
+      POSTGRES_DB: meshnet
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meshnet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  management:
+    build:
+      context: .
+      dockerfile: management/Dockerfile
+    restart: unless-stopped
+    environment:
+      MGMT_GRPC_ADDR: ":50051"
+      MGMT_HTTP_ADDR: ":8080"
+      MGMT_JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      MGMT_NETWORK_CIDR: "100.64.0.0/10"
+      MGMT_DNS_SUFFIX: "mesh"
+      MESHNET_DEFAULT_KEY: "${MESHNET_DEFAULT_KEY:-MESHNET-DEFAULT-KEY}"
+      DATABASE_URL: "host=postgres user=meshnet password=${POSTGRES_PASSWORD:-meshnet-secret} dbname=meshnet sslmode=disable"
+    ports:
+      - "50051:50051"
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  signal:
+    build:
+      context: .
+      dockerfile: signal/Dockerfile
+    restart: unless-stopped
+    environment:
+      SIGNAL_ADDR: ":10000"
+    ports:
+      - "10000:10000"
+
+  relay:
+    build:
+      context: .
+      dockerfile: relay/Dockerfile
+    restart: unless-stopped
+    environment:
+      RELAY_PUBLIC_IP: "${RELAY_PUBLIC_IP:-127.0.0.1}"
+      RELAY_UDP_PORT: "3478"
+      RELAY_REALM: "meshnet.io"
+      RELAY_AUTH_USER: "meshnet"
+      RELAY_AUTH_PASS: "${RELAY_AUTH_PASS:-change-me-in-production}"
+    ports:
+      - "3478:3478/udp"
+
+  dashboard:
+    build:
+      context: ./dashboard
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_MGMT_API: "http://management:8080"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - management
+
+volumes:
+  postgres_data:
