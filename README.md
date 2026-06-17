@@ -51,6 +51,69 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 
 ---
 
+## Firewall & Required Ports
+
+The diagram below shows what connects to what and which ports must be reachable on your server from the internet. **Agent devices need no inbound ports open** — they only make outbound connections.
+
+```mermaid
+graph TB
+    subgraph agents["Agent Devices (behind NAT — no inbound ports needed)"]
+        A["Device A"]
+        B["Device B"]
+    end
+
+    subgraph admin["Admin"]
+        Browser["Browser"]
+    end
+
+    subgraph server["Your Server  (public IP — open these ports inbound)"]
+        Mgmt["Management\nTCP :50051  gRPC/TLS\nTCP :8080   HTTPS API"]
+        Sig["Signal\nTCP :10000  gRPC/TLS"]
+        Relay["Relay\nUDP :3478   STUN/TURN"]
+        Dash["Dashboard\nTCP :3000"]
+    end
+
+    A -- "TCP :50051  enroll + sync" --> Mgmt
+    A -- "TCP :10000  ICE signaling" --> Sig
+    A -. "UDP :3478  relay fallback\n(only if hole-punch fails)" .-> Relay
+
+    B -- "TCP :50051  enroll + sync" --> Mgmt
+    B -- "TCP :10000  ICE signaling" --> Sig
+    B -. "UDP :3478  relay fallback\n(only if hole-punch fails)" .-> Relay
+
+    A <-- "WireGuard P2P  UDP ephemeral\n(hole-punched, no server port)" --> B
+
+    Browser -- "TCP :8080 / :3000" --> Dash
+```
+
+### Port reference
+
+| Port | Protocol | Who connects | Required? | Purpose |
+|------|----------|-------------|-----------|---------|
+| **50051** | TCP | Agents | **Yes** | Management gRPC/TLS — enrollment, config sync, push updates |
+| **10000** | TCP | Agents | **Yes** | Signal gRPC/TLS — ICE candidate exchange for NAT traversal |
+| **3478** | UDP | Agents | Recommended | STUN/TURN relay — fallback when direct hole-punch fails (symmetric NAT) |
+| **8080** | TCP | Browsers / agents | For dashboard | HTTPS REST API — also serves the dashboard if not separately proxied |
+| **3000** | TCP | Browsers | Optional | Next.js dashboard (can be hidden behind a reverse proxy on :443) |
+
+### What you do NOT need to open
+
+- **No inbound ports on agent devices.** Agents only make outbound TCP connections to the server. WireGuard P2P traffic uses ephemeral UDP ports negotiated by ICE hole-punching — both sides connect outward and the packets meet in the middle.
+- **No WireGuard UDP port on the server.** The server is not a WireGuard peer; it is a control plane only.
+
+### Production recommendation
+
+Put the management API and dashboard behind a reverse proxy (Nginx, Caddy, Traefik) on port **443**, issue a real TLS certificate, and close port 8080/3000 to the public. Only ports 50051 and 10000 need to stay directly exposed for agents.
+
+```
+Internet → :443 (HTTPS, reverse proxy) → :8080 management API / :3000 dashboard
+Internet → :50051 (gRPC/TLS)           → management server
+Internet → :10000 (gRPC/TLS)           → signal server
+Internet → :3478  (UDP)                → relay server
+```
+
+---
+
 ## Docker Images
 
 Pre-built images are published to GitHub Container Registry. Every push to `main` publishes `:latest`; version tags (e.g. `v0.2.0`) are published on release.
