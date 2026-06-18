@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { clsx } from 'clsx'
-import { clearToken } from '@/lib/auth'
+import { logout } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
 
 const nav = [
@@ -17,8 +17,8 @@ export function Sidebar() {
   const path = usePathname()
   const router = useRouter()
 
-  const signOut = () => {
-    clearToken()
+  const signOut = async () => {
+    await logout()
     router.push('/login')
   }
 

@@ -2,6 +2,10 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -47,17 +51,14 @@ type Engine struct {
 
 // New creates an Engine. Loads or generates the WireGuard private key from state.
 func New(cfg *config.Config) (*Engine, error) {
-	_, privKey, err := state.LoadOrCreate(cfg.StateDir)
+	st, privKey, err := state.LoadOrCreate(cfg.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
 
-	tlsCfg, err := cfg.TLSConfig()
+	mgmTLS, sigTLS, err := buildTLSConfigs(cfg, st)
 	if err != nil {
 		return nil, fmt.Errorf("TLS config: %w", err)
-	}
-	if cfg.TLSSkipVerify && cfg.TLSCACert == "" {
-		log.Warn().Msg("TLS skip-verify enabled — server certificate is not validated (default for self-signed certs)")
 	}
 
 	wg, err := wgmgr.New(cfg.WGInterface, privKey)
@@ -65,13 +66,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("wireguard: %w", err)
 	}
 
-	mgm, err := mgmclient.New(cfg.ManagementURL, tlsCfg)
+	mgm, err := mgmclient.New(cfg.ManagementURL, mgmTLS)
 	if err != nil {
 		wg.Close()
 		return nil, fmt.Errorf("management client: %w", err)
 	}
 
-	sig, err := signalclient.New(cfg.SignalURL, wg.PublicKey(), tlsCfg)
+	sig, err := signalclient.New(cfg.SignalURL, wg.PublicKey(), sigTLS)
 	if err != nil {
 		_ = wg.Close()
 		_ = mgm.Close()
@@ -79,7 +80,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	iceMgr := ice.New(wg.PublicKey(), cfg.STUNURLs, sig)
-	dnsResolver := dns.New("127.0.0.1:53535", "mesh", "8.8.8.8:53")
+	dnsResolver := dns.New("127.0.0.1:53535", "mesh", cfg.DNSUpstream)
 
 	return &Engine{
 		cfg:           cfg,
@@ -139,7 +140,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Signal client: open stream, register, and dispatch ICE messages.
 	sigErrCh := make(chan error, 1)
 	go func() {
-		err := e.sig.Connect(ctx, func(msg *signalv1.Message) {
+		err := e.sig.Connect(ctx, loginResp.Token, func(msg *signalv1.Message) {
 			e.ice.HandleSignal(msg)
 		})
 		sigErrCh <- err
@@ -425,4 +426,52 @@ func shortKey(k string) string {
 		return k[:8]
 	}
 	return k
+}
+
+// buildTLSConfigs returns per-server TLS configs.
+// When TLSCACert is set or TLSSkipVerify is explicitly false, standard TLS is used.
+// Otherwise TOFU (Trust On First Use) fingerprint pinning is used: the certificate
+// fingerprint is stored in state on first connect and verified on subsequent connects.
+func buildTLSConfigs(cfg *config.Config, st *state.State) (*tls.Config, *tls.Config, error) {
+	if cfg.TLSCACert != "" || !cfg.TLSSkipVerify {
+		tlsCfg, err := cfg.TLSConfig()
+		return tlsCfg, tlsCfg, err
+	}
+	mgmTLS := makeTOFUConfig(st, cfg.StateDir, cfg.ManagementURL)
+	sigTLS := makeTOFUConfig(st, cfg.StateDir, cfg.SignalURL)
+	return mgmTLS, sigTLS, nil
+}
+
+// makeTOFUConfig creates a *tls.Config that implements TOFU fingerprint pinning
+// for the given server address. The fingerprint is stored in / verified from state.
+func makeTOFUConfig(st *state.State, stateDir, serverAddr string) *tls.Config {
+	return &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec — custom verification via VerifyPeerCertificate
+		MinVersion:         tls.VersionTLS12,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return fmt.Errorf("server presented no certificate")
+			}
+			h := sha256.Sum256(rawCerts[0])
+			fp := hex.EncodeToString(h[:])
+
+			if st.ServerFingerprints == nil {
+				st.ServerFingerprints = make(map[string]string)
+			}
+			pinned, exists := st.ServerFingerprints[serverAddr]
+			if !exists {
+				st.ServerFingerprints[serverAddr] = fp
+				_ = st.Save(stateDir)
+				log.Info().
+					Str("server", serverAddr).
+					Str("fingerprint", fp[:16]+"…").
+					Msg("TOFU: pinned server certificate — verify this fingerprint on first use")
+				return nil
+			}
+			if pinned != fp {
+				return fmt.Errorf("TOFU: server certificate changed for %s (pinned=%s…, got=%s…) — delete state.json to re-pin", serverAddr, pinned[:16], fp[:16])
+			}
+			return nil
+		},
+	}
 }

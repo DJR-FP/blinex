@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_MGMT_API ?? 'https://localhost:8080'
+const BASE = '/api/v1'
 
 export interface Peer {
   id: string
@@ -48,19 +48,15 @@ export interface SetupKey {
   created_at: string
 }
 
-async function request<T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(`${BASE}/api/v1${path}`, {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...init?.headers,
-    },
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
+  if (res.status === 401) {
+    if (typeof window !== 'undefined') window.location.href = '/login'
+    throw new Error('Unauthorized')
+  }
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`${res.status} ${body}`)
@@ -71,49 +67,39 @@ async function request<T>(
 
 export const api = {
   peers: {
-    list: (token: string) =>
-      request<{ peers: Peer[] }>('/peers', token),
-    delete: (token: string, key: string) =>
-      request<void>(`/peers/${encodeURIComponent(key)}`, token, { method: 'DELETE' }),
-    setRoutes: (token: string, key: string, routes: string[]) =>
-      request<{ peer: Peer }>(`/peers/${encodeURIComponent(key)}/routes`, token, {
+    list: () => request<{ peers: Peer[] }>('/peers'),
+    delete: (key: string) =>
+      request<void>(`/peers/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    setRoutes: (key: string, routes: string[]) =>
+      request<{ peer: Peer }>(`/peers/${encodeURIComponent(key)}/routes`, {
         method: 'PUT',
         body: JSON.stringify({ routes }),
       }),
   },
   setupKeys: {
-    list: (token: string) =>
-      request<{ setup_keys: SetupKey[] }>('/setup-keys', token),
-    create: (
-      token: string,
-      payload: { name: string; ephemeral?: boolean; expires_in_days?: number },
-    ) =>
-      request<{ setup_key: SetupKey }>('/setup-keys', token, {
+    list: () => request<{ setup_keys: SetupKey[] }>('/setup-keys'),
+    create: (payload: { name: string; ephemeral?: boolean; expires_in_days?: number }) =>
+      request<{ setup_key: SetupKey }>('/setup-keys', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
-    delete: (token: string, id: string) =>
-      request<void>(`/setup-keys/${encodeURIComponent(id)}`, token, {
-        method: 'DELETE',
-      }),
+    delete: (id: string) =>
+      request<void>(`/setup-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   rules: {
-    list: (token: string) =>
-      request<{ rules: Rule[] }>('/rules', token),
-    create: (token: string, payload: RulePayload) =>
-      request<{ rule: Rule }>('/rules', token, {
+    list: () => request<{ rules: Rule[] }>('/rules'),
+    create: (payload: RulePayload) =>
+      request<{ rule: Rule }>('/rules', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
-    update: (token: string, id: string, payload: Partial<RulePayload>) =>
-      request<{ rule: Rule }>(`/rules/${encodeURIComponent(id)}`, token, {
+    update: (id: string, payload: Partial<RulePayload>) =>
+      request<{ rule: Rule }>(`/rules/${encodeURIComponent(id)}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),
-    delete: (token: string, id: string) =>
-      request<void>(`/rules/${encodeURIComponent(id)}`, token, {
-        method: 'DELETE',
-      }),
+    delete: (id: string) =>
+      request<void>(`/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
-  health: () => fetch(`${BASE}/api/v1/health`).then(r => r.json()),
+  health: () => fetch(`${BASE}/health`).then(r => r.json()),
 }

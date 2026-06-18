@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -15,11 +16,16 @@ type Claims struct {
 }
 
 type Manager struct {
-	secret []byte
+	secret  []byte
+	mu      sync.RWMutex
+	revoked map[string]time.Time // wgPubKey → revocation time
 }
 
 func NewManager(secret string) *Manager {
-	return &Manager{secret: []byte(secret)}
+	return &Manager{
+		secret:  []byte(secret),
+		revoked: make(map[string]time.Time),
+	}
 }
 
 func (m *Manager) IssueToken(peerID, wgPubKey, accountID string) (string, error) {
@@ -29,11 +35,18 @@ func (m *Manager) IssueToken(peerID, wgPubKey, accountID string) (string, error)
 		AccountID: accountID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(m.secret)
+}
+
+// RevokeByWGKey immediately invalidates all tokens for the given WireGuard public key.
+func (m *Manager) RevokeByWGKey(wgPubKey string) {
+	m.mu.Lock()
+	m.revoked[wgPubKey] = time.Now()
+	m.mu.Unlock()
 }
 
 func (m *Manager) ValidateToken(tokenStr string) (*Claims, error) {
@@ -49,6 +62,16 @@ func (m *Manager) ValidateToken(tokenStr string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token")
+	}
+	// Check revocation list: reject tokens issued before the revocation time.
+	m.mu.RLock()
+	revokedAt, isRevoked := m.revoked[claims.WGPubKey]
+	m.mu.RUnlock()
+	if isRevoked {
+		issuedAt := claims.IssuedAt.Time
+		if !issuedAt.After(revokedAt) {
+			return nil, fmt.Errorf("token has been revoked")
+		}
 	}
 	return claims, nil
 }

@@ -11,7 +11,18 @@ import (
 )
 
 type State struct {
-	WGPrivateKey string `json:"wg_private_key"` // base64
+	WGPrivateKey       string            `json:"wg_private_key"`                  // base64
+	ServerFingerprints map[string]string `json:"server_fingerprints,omitempty"`   // addr → SHA-256 hex
+}
+
+// Save persists state to dir/state.json.
+func (s *State) Save(dir string) error {
+	path := filepath.Join(dir, "state.json")
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0600)
 }
 
 // LoadOrCreate reads persisted state, or creates fresh state if the file doesn't exist.

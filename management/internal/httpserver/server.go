@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -30,8 +31,9 @@ func New(st store.Store, authMgr *auth.Manager, notify func(string), version str
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	allowedOrigins := parseOrigins(os.Getenv("MGMT_ALLOWED_ORIGINS"))
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Authorization", "Content-Type"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -116,6 +118,7 @@ func (s *Server) deletePeer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
+	s.auth.RevokeByWGKey(key)
 	c.Status(http.StatusNoContent)
 }
 
@@ -128,9 +131,16 @@ func (s *Server) setPeerRoutes(c *gin.Context) {
 		return
 	}
 
+	_, meshNet, _ := net.ParseCIDR("100.64.0.0/10")
 	for _, r := range req.Routes {
-		if _, _, err := net.ParseCIDR(r); err != nil {
+		_, cidr, err := net.ParseCIDR(r)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid CIDR: " + r})
+			return
+		}
+		// Reject routes that would overlap with or contain the mesh CIDR to prevent loops.
+		if meshNet != nil && (meshNet.Contains(cidr.IP) || cidr.Contains(meshNet.IP)) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "route " + r + " conflicts with mesh CIDR 100.64.0.0/10"})
 			return
 		}
 	}
@@ -415,4 +425,19 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 func claimsFromCtx(c *gin.Context) *auth.Claims {
 	v, _ := c.Get("claims")
 	return v.(*auth.Claims)
+}
+
+// parseOrigins splits a comma-separated MGMT_ALLOWED_ORIGINS value.
+// Defaults to localhost:3000 when empty (suitable for local development).
+func parseOrigins(raw string) []string {
+	if raw == "" {
+		return []string{"http://localhost:3000", "https://localhost:3000"}
+	}
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }

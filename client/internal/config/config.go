@@ -17,8 +17,10 @@ type Config struct {
 	StateDir      string   `json:"state_dir"`    // dir for state.json
 	STUNURLs      []string `json:"stun_urls"`    // e.g. ["stun:stun.l.google.com:19302"]
 	LogLevel      string   `json:"log_level"`
+	DNSUpstream   string   `json:"dns_upstream"` // upstream DNS resolver, e.g. "8.8.8.8:53"
 	// TLS options for connecting to management and signal servers.
-	// TLSSkipVerify=true (default) allows self-signed server certificates.
+	// When TLSSkipVerify=true (default) and TLSCACert is empty, TOFU fingerprint
+	// pinning is used: the server cert is trusted on first connect and pinned.
 	// Set TLSCACert to pin a specific CA cert PEM file instead.
 	TLSSkipVerify bool   `json:"tls_skip_verify"`
 	TLSCACert     string `json:"tls_ca_cert"` // path to CA cert PEM
@@ -37,7 +39,9 @@ func Load(path string) (*Config, error) {
 		StateDir:      getEnv("MESHNET_STATE_DIR", "/var/lib/meshnet"),
 		LogLevel:      getEnv("LOG_LEVEL", "info"),
 		STUNURLs:      parseList(getEnv("MESHNET_STUN_URLS", "stun:stun.l.google.com:19302")),
+		DNSUpstream:   getEnv("MESHNET_DNS_UPSTREAM", "8.8.8.8:53"),
 		// Default to skip-verify so the agent works with self-signed server certs.
+		// TOFU fingerprint pinning is used automatically in this mode.
 		TLSSkipVerify: getEnv("MESHNET_TLS_SKIP_VERIFY", "true") != "false",
 		TLSCACert:     getEnv("MESHNET_TLS_CA_CERT", ""),
 	}

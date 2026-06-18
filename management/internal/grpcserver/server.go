@@ -15,6 +15,7 @@ import (
 	managementv1 "github.com/meshnet/gen/management/v1"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
+	grpcpeer "google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -28,11 +29,12 @@ type syncSub struct {
 // Server implements the ManagementService gRPC interface.
 type Server struct {
 	managementv1.UnimplementedManagementServiceServer
-	store   store.Store
-	auth    *auth.Manager
-	ipam    *IPAM
-	network string // full mesh CIDR, e.g. "100.64.0.0/10"
-	dns     string // dns suffix, e.g. "mesh"
+	store       store.Store
+	auth        *auth.Manager
+	ipam        *IPAM
+	network     string // full mesh CIDR, e.g. "100.64.0.0/10"
+	dns         string // dns suffix, e.g. "mesh"
+	loginLimits *rateLimiter
 
 	subsMu sync.RWMutex
 	subs   map[string]*syncSub // wgPubKey → subscriber
@@ -40,12 +42,13 @@ type Server struct {
 
 func New(st store.Store, authMgr *auth.Manager, ipam *IPAM, networkCIDR, dnsSuffix string) *Server {
 	return &Server{
-		store:   st,
-		auth:    authMgr,
-		ipam:    ipam,
-		network: networkCIDR,
-		dns:     dnsSuffix,
-		subs:    make(map[string]*syncSub),
+		store:       st,
+		auth:        authMgr,
+		ipam:        ipam,
+		network:     networkCIDR,
+		dns:         dnsSuffix,
+		subs:        make(map[string]*syncSub),
+		loginLimits: newRateLimiter(),
 	}
 }
 
@@ -55,6 +58,15 @@ func (s *Server) GetServerKey(_ context.Context, _ *managementv1.GetServerKeyReq
 }
 
 func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*managementv1.LoginResponse, error) {
+	// Rate limit by source IP: 5 attempts per 60 seconds.
+	peerIP := "unknown"
+	if p, ok := grpcpeer.FromContext(ctx); ok {
+		peerIP = p.Addr.String()
+	}
+	if !s.loginLimits.Allow(peerIP) {
+		return nil, status.Error(codes.ResourceExhausted, "too many login attempts, please try again later")
+	}
+
 	if req.SetupKey == "" || req.WgPubKey == "" {
 		return nil, status.Error(codes.InvalidArgument, "setup_key and wg_pub_key are required")
 	}

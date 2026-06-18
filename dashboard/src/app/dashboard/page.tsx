@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { api, type Peer } from '@/lib/api'
-import { getToken } from '@/lib/auth'
 import { PeerCard } from '@/components/PeerCard'
 
 export default function DevicesPage() {
@@ -12,10 +11,8 @@ export default function DevicesPage() {
   const [showInstall, setShowInstall] = useState(false)
 
   const load = useCallback(async () => {
-    const token = getToken()
-    if (!token) return
     try {
-      const data = await api.peers.list(token)
+      const data = await api.peers.list()
       setPeers(data.peers ?? [])
     } catch (e) {
       setError(String(e))
@@ -31,21 +28,16 @@ export default function DevicesPage() {
   }, [load])
 
   const handleDelete = async (key: string) => {
-    const token = getToken()
-    if (!token) return
-    await api.peers.delete(token, key)
+    await api.peers.delete(key)
     setPeers(prev => prev.filter(p => p.wg_pub_key !== key))
   }
 
   const handleRoutesChange = async (key: string, routes: string[]) => {
-    const token = getToken()
-    if (!token) return
-    const resp = await api.peers.setRoutes(token, key, routes)
+    const resp = await api.peers.setRoutes(key, routes)
     setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, advertised_routes: routes, ...resp.peer } : p))
   }
 
   const connected = peers.filter(p => p.connected).length
-
   const installCmd = `curl -fsSL https://install.meshnet.io/agent | MESHNET_SETUP_KEY=<your-key> bash`
 
   return (
@@ -89,13 +81,8 @@ export default function DevicesPage() {
         </div>
       )}
 
-      {loading && (
-        <div className="text-gray-400 text-sm">Loading…</div>
-      )}
-
-      {error && (
-        <div className="bg-red-50 text-red-600 rounded-xl p-4 text-sm">{error}</div>
-      )}
+      {loading && <div className="text-gray-400 text-sm">Loading…</div>}
+      {error && <div className="bg-red-50 text-red-600 rounded-xl p-4 text-sm">{error}</div>}
 
       {!loading && peers.length === 0 && (
         <div className="text-center py-20 text-gray-400">

@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { api, type SetupKey } from '@/lib/api'
-import { getToken } from '@/lib/auth'
 
 export default function SetupKeysPage() {
   const [keys, setKeys] = useState<SetupKey[]>([])
@@ -15,10 +14,8 @@ export default function SetupKeysPage() {
   const [copied, setCopied] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const token = getToken()
-    if (!token) return
     try {
-      const data = await api.setupKeys.list(token)
+      const data = await api.setupKeys.list()
       setKeys(data.setup_keys ?? [])
     } catch (e) {
       setError(String(e))
@@ -31,11 +28,10 @@ export default function SetupKeysPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    const token = getToken()
-    if (!token || !newKeyName) return
+    if (!newKeyName) return
     setCreating(true)
     try {
-      const data = await api.setupKeys.create(token, {
+      const data = await api.setupKeys.create({
         name: newKeyName,
         ephemeral: newKeyEphemeral,
         expires_in_days: 365,
@@ -51,10 +47,8 @@ export default function SetupKeysPage() {
   }
 
   const handleDelete = async (id: string) => {
-    const token = getToken()
-    if (!token) return
     try {
-      await api.setupKeys.delete(token, id)
+      await api.setupKeys.delete(id)
       setKeys(prev => prev.filter(k => k.id !== id))
     } catch (e) {
       setError(String(e))

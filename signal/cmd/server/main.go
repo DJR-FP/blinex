@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	signalv1 "github.com/meshnet/gen/signal/v1"
+	signalauth "github.com/meshnet/signal/internal/auth"
 	"github.com/meshnet/signal/internal/server"
 	"github.com/meshnet/signal/internal/tlsconfig"
 	"github.com/rs/zerolog"
@@ -39,9 +40,20 @@ func main() {
 		log.Fatal().Err(err).Str("addr", addr).Msg("failed to listen")
 	}
 
-	s := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
+	opts := []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsCfg))}
+	jwtSecret := os.Getenv("MGMT_JWT_SECRET")
+	if jwtSecret != "" {
+		opts = append(opts, grpc.StreamInterceptor(signalauth.StreamInterceptor(jwtSecret)))
+		log.Info().Msg("signal: JWT authentication enabled")
+	} else {
+		log.Warn().Msg("signal: MGMT_JWT_SECRET not set — connections are unauthenticated")
+	}
+
+	s := grpc.NewServer(opts...)
 	signalv1.RegisterSignalServiceServer(s, server.New())
-	reflection.Register(s)
+	if os.Getenv("GRPC_REFLECTION") == "true" {
+		reflection.Register(s)
+	}
 
 	log.Info().Str("addr", addr).Msg("gRPC/TLS signal server starting")
 	if err := s.Serve(lis); err != nil {

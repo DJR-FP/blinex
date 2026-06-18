@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { api, Rule, RulePayload } from '@/lib/api'
 
 const PROTOCOLS = ['all', 'tcp', 'udp', 'icmp']
@@ -191,47 +190,36 @@ function RuleModal({
 }
 
 export default function ACLsPage() {
-  const router = useRouter()
-  const [token, setToken] = useState<string | null>(null)
   const [rules, setRules] = useState<Rule[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modal, setModal] = useState<{ open: boolean; editing?: Rule }>({ open: false })
 
-  useEffect(() => {
-    const t = localStorage.getItem('meshnet_token')
-    if (!t) { router.push('/'); return }
-    setToken(t)
-  }, [router])
-
   const fetchRules = useCallback(async () => {
-    if (!token) return
     try {
-      const data = await api.rules.list(token)
+      const data = await api.rules.list()
       setRules(data.rules ?? [])
     } catch (err) {
       setError(String(err))
     } finally {
       setLoading(false)
     }
-  }, [token])
+  }, [])
 
   useEffect(() => { fetchRules() }, [fetchRules])
 
   const handleSave = async (payload: RulePayload) => {
-    if (!token) return
     if (modal.editing) {
-      await api.rules.update(token, modal.editing.id, payload)
+      await api.rules.update(modal.editing.id, payload)
     } else {
-      await api.rules.create(token, payload)
+      await api.rules.create(payload)
     }
     await fetchRules()
   }
 
   const handleToggle = async (rule: Rule) => {
-    if (!token) return
     try {
-      await api.rules.update(token, rule.id, { enabled: !rule.enabled })
+      await api.rules.update(rule.id, { enabled: !rule.enabled })
       await fetchRules()
     } catch (err) {
       setError(String(err))
@@ -239,10 +227,9 @@ export default function ACLsPage() {
   }
 
   const handleDelete = async (rule: Rule) => {
-    if (!token) return
     if (!confirm(`Delete rule "${rule.name}"?`)) return
     try {
-      await api.rules.delete(token, rule.id)
+      await api.rules.delete(rule.id)
       await fetchRules()
     } catch (err) {
       setError(String(err))

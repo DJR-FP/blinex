@@ -1,13 +1,7 @@
-'use client'
-
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { getToken } from '@/lib/auth'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 
 export default function Home() {
-  const router = useRouter()
-  useEffect(() => {
-    router.replace(getToken() ? '/dashboard' : '/login')
-  }, [router])
-  return null
+  const token = cookies().get('meshnet_token')
+  redirect(token ? '/dashboard' : '/login')
 }

@@ -2,13 +2,11 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { setToken } from '@/lib/auth'
-
-const BASE = process.env.NEXT_PUBLIC_MGMT_API ?? 'http://localhost:8080'
+import { login } from '@/lib/auth'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [token, setTokenInput] = useState('')
+  const [token, setToken] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -17,14 +15,10 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      const res = await fetch(`${BASE}/api/v1/peers`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error('Invalid token')
-      setToken(token)
+      await login(token.trim())
       router.push('/dashboard')
-    } catch {
-      setError('Invalid token. Please try again.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid token. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -51,7 +45,7 @@ export default function LoginPage() {
             </label>
             <textarea
               value={token}
-              onChange={e => setTokenInput(e.target.value)}
+              onChange={e => setToken(e.target.value)}
               placeholder="Paste the JWT token from your enrolled device"
               rows={3}
               className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent font-mono text-xs resize-none"
