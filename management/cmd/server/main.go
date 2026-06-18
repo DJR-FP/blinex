@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 
@@ -50,7 +51,7 @@ func main() {
 		st = pgStore
 		log.Info().Msg("using PostgreSQL store")
 	} else {
-		st = memory.New()
+		st = memory.New(cfg.DefaultKey)
 		log.Info().Msg("using in-memory store (set DATABASE_URL for persistence)")
 	}
 
@@ -61,6 +62,15 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to initialise IPAM")
 	}
 
+	// Restore IPAM state from persisted peers so IPs are not re-allocated after restart.
+	allPeers, err := st.GetAllPeers(context.Background())
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to preload IPAM from existing peers")
+	} else {
+		ipam.PreloadPeers(allPeers)
+		log.Info().Int("peers", len(allPeers)).Msg("IPAM restored from existing peers")
+	}
+
 	grpcSrv := grpcserver.New(st, authMgr, ipam, cfg.NetworkCIDR, cfg.DNSSuffix)
 	httpSrv := httpserver.New(st, authMgr, grpcSrv.NotifyAccount, version)
 
@@ -69,9 +79,16 @@ func main() {
 		log.Fatal().Err(err).Str("addr", cfg.GRPCAddr).Msg("failed to listen")
 	}
 
-	s := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
+	s := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(tlsCfg)),
+		grpc.StreamInterceptor(grpcserver.AuthStreamInterceptor(authMgr)),
+		grpc.UnaryInterceptor(grpcserver.AuthUnaryInterceptor(authMgr)),
+	)
 	managementv1.RegisterManagementServiceServer(s, grpcSrv)
-	reflection.Register(s)
+	if os.Getenv("GRPC_REFLECTION") == "true" {
+		reflection.Register(s)
+		log.Info().Msg("gRPC reflection enabled")
+	}
 
 	go func() {
 		log.Info().Str("addr", cfg.GRPCAddr).Msg("gRPC/TLS server starting")

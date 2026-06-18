@@ -23,6 +23,10 @@ func main() {
 		AuthPass: getEnv("RELAY_AUTH_PASS", "change-me"),
 	}
 
+	if cfg.AuthPass == "change-me" {
+		log.Warn().Msg("RELAY_AUTH_PASS is the default 'change-me' — set RELAY_AUTH_PASS in production")
+	}
+
 	log.Info().Str("ip", cfg.PublicIP).Int("port", cfg.UDPPort).Msg("relay server starting")
 	if err := server.Start(cfg); err != nil {
 		log.Fatal().Err(err).Msg("relay server error")

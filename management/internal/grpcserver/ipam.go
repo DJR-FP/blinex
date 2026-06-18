@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"github.com/meshnet/management/internal/domain"
 )
 
 // IPAM allocates IPs from a CGNAT block (default: 100.64.0.0/10).
@@ -44,6 +46,32 @@ func (i *IPAM) Allocate(wgPubKey string) (string, error) {
 	i.next++
 	i.leased[wgPubKey] = host
 	return hostToIP(host), nil
+}
+
+// PreloadPeers restores IPAM state from persisted peers so that IPs already
+// assigned in a previous run are not re-allocated after a server restart.
+// Must be called before the server begins serving requests.
+func (i *IPAM) PreloadPeers(peers []*domain.Peer) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for _, p := range peers {
+		if p.IP == "" {
+			continue
+		}
+		ip := net.ParseIP(p.IP)
+		if ip == nil {
+			continue
+		}
+		v4 := ip.To4()
+		if v4 == nil {
+			continue
+		}
+		host := binary.BigEndian.Uint32(v4)
+		i.leased[p.WGPubKey] = host
+		if host >= i.next {
+			i.next = host + 1
+		}
+	}
 }
 
 func hostToIP(host uint32) string {

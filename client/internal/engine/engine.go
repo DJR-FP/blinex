@@ -148,7 +148,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Management sync: receive peer list updates.
 	syncErrCh := make(chan error, 1)
 	go func() {
-		syncErrCh <- e.mgm.Sync(ctx, e.wg.PublicKey(), e.applySync)
+		syncErrCh <- e.mgm.Sync(ctx, loginResp.Token, e.wg.PublicKey(), e.applySync)
 	}()
 
 	select {

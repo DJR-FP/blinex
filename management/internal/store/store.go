@@ -22,6 +22,7 @@ type Store interface {
 	// Peers
 	GetPeer(ctx context.Context, wgPubKey string) (*domain.Peer, error)
 	GetPeersByAccount(ctx context.Context, accountID string) ([]*domain.Peer, error)
+	GetAllPeers(ctx context.Context) ([]*domain.Peer, error)
 	SavePeer(ctx context.Context, peer *domain.Peer) error
 	DeletePeer(ctx context.Context, wgPubKey string) error
 

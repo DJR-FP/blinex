@@ -183,6 +183,18 @@ func (s *Store) GetPeersByAccount(_ context.Context, accountID string) ([]*domai
 	return out, nil
 }
 
+func (s *Store) GetAllPeers(_ context.Context) ([]*domain.Peer, error) {
+	var rows []peer
+	if err := s.db.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Peer, len(rows))
+	for i, r := range rows {
+		out[i] = toDomainPeer(&r)
+	}
+	return out, nil
+}
+
 func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 	return s.db.Save(&peer{
 		ID:               dp.ID,

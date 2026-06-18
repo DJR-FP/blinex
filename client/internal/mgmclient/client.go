@@ -9,6 +9,7 @@ import (
 	managementv1 "github.com/meshnet/gen/management/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 )
 
 // Client wraps the ManagementService gRPC client.
@@ -38,8 +39,10 @@ func (c *Client) Login(ctx context.Context, setupKey, wgPubKey string, meta *com
 }
 
 // Sync opens a server-streaming RPC and calls handler for every update.
+// token is the JWT received from Login and is sent as gRPC metadata.
 // It blocks until ctx is cancelled.
-func (c *Client) Sync(ctx context.Context, wgPubKey string, handler func(*managementv1.SyncResponse) error) error {
+func (c *Client) Sync(ctx context.Context, token, wgPubKey string, handler func(*managementv1.SyncResponse) error) error {
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token))
 	stream, err := c.rpc.Sync(ctx, &managementv1.SyncRequest{WgPubKey: wgPubKey})
 	if err != nil {
 		return fmt.Errorf("opening sync stream: %w", err)

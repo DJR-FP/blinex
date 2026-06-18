@@ -1,6 +1,9 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -19,15 +22,34 @@ type Config struct {
 }
 
 func Load() *Config {
+	secret := os.Getenv("MGMT_JWT_SECRET")
+	if len(secret) < 32 {
+		fmt.Fprintln(os.Stderr, "FATAL: MGMT_JWT_SECRET must be set to at least 32 random characters")
+		fmt.Fprintln(os.Stderr, "       Generate one with: openssl rand -hex 32")
+		os.Exit(1)
+	}
+
+	defaultKey := os.Getenv("MESHNET_DEFAULT_KEY")
+	if defaultKey == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			fmt.Fprintf(os.Stderr, "FATAL: failed to generate random setup key: %v\n", err)
+			os.Exit(1)
+		}
+		defaultKey = "msk-" + hex.EncodeToString(b)
+		fmt.Fprintf(os.Stderr, "\n  *** GENERATED SETUP KEY: %s ***\n", defaultKey)
+		fmt.Fprintln(os.Stderr, "  Set MESHNET_DEFAULT_KEY to use a fixed key across restarts.\n")
+	}
+
 	return &Config{
 		GRPCAddr:    getEnv("MGMT_GRPC_ADDR", ":50051"),
 		HTTPAddr:    getEnv("MGMT_HTTP_ADDR", ":8080"),
-		JWTSecret:   getEnv("MGMT_JWT_SECRET", "change-me-in-production"),
+		JWTSecret:   secret,
 		LogLevel:    getEnv("LOG_LEVEL", "info"),
 		NetworkCIDR: getEnv("MGMT_NETWORK_CIDR", "100.64.0.0/10"),
 		DNSSuffix:   getEnv("MGMT_DNS_SUFFIX", "mesh"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
-		DefaultKey:  getEnv("MESHNET_DEFAULT_KEY", "MESHNET-DEFAULT-KEY"),
+		DefaultKey:  defaultKey,
 		TLSCertFile: getEnv("TLS_CERT_FILE", ""),
 		TLSKeyFile:  getEnv("TLS_KEY_FILE", ""),
 	}

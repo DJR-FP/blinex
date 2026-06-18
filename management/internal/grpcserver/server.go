@@ -20,8 +20,9 @@ import (
 
 // syncSub is a channel that receives peer-list updates for one connected peer.
 type syncSub struct {
-	peerKey string
-	ch      chan struct{}
+	peerKey   string
+	accountID string
+	ch        chan struct{}
 }
 
 // Server implements the ManagementService gRPC interface.
@@ -60,7 +61,10 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 
 	sk, err := s.store.GetSetupKey(ctx, req.SetupKey)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid setup key: %v", err)
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired setup key")
+	}
+	if sk.Ephemeral && sk.UsedCount > 0 {
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired setup key")
 	}
 
 	// Allocate a stable IP for this public key.
@@ -124,13 +128,17 @@ func (s *Server) Sync(req *managementv1.SyncRequest, stream managementv1.Managem
 	if req.WgPubKey == "" {
 		return status.Error(codes.InvalidArgument, "wg_pub_key is required")
 	}
+	// Verify the caller's token matches the key they claim to be.
+	if claims := claimsFromContext(stream.Context()); claims != nil && claims.WGPubKey != req.WgPubKey {
+		return status.Error(codes.PermissionDenied, "wg_pub_key does not match token")
+	}
 
 	peer, err := s.store.GetPeer(stream.Context(), req.WgPubKey)
 	if err != nil {
 		return status.Errorf(codes.NotFound, "peer not registered: %v", err)
 	}
 
-	sub := &syncSub{peerKey: req.WgPubKey, ch: make(chan struct{}, 1)}
+	sub := &syncSub{peerKey: req.WgPubKey, accountID: peer.AccountID, ch: make(chan struct{}, 1)}
 	s.registerSub(req.WgPubKey, sub)
 	defer s.unregisterSub(req.WgPubKey)
 
@@ -167,6 +175,9 @@ func (s *Server) Sync(req *managementv1.SyncRequest, stream managementv1.Managem
 func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePeerMetaRequest) (*managementv1.UpdatePeerMetaResponse, error) {
 	if req.WgPubKey == "" {
 		return nil, status.Error(codes.InvalidArgument, "wg_pub_key is required")
+	}
+	if claims := claimsFromContext(ctx); claims != nil && claims.WGPubKey != req.WgPubKey {
+		return nil, status.Error(codes.PermissionDenied, "wg_pub_key does not match token")
 	}
 	peer, err := s.store.GetPeer(ctx, req.WgPubKey)
 	if err != nil {
@@ -249,6 +260,9 @@ func (s *Server) notifyAll(accountID string) {
 	s.subsMu.RLock()
 	defer s.subsMu.RUnlock()
 	for _, sub := range s.subs {
+		if sub.accountID != accountID {
+			continue
+		}
 		select {
 		case sub.ch <- struct{}{}:
 		default:

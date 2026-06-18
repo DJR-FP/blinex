@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_MGMT_API ?? 'http://localhost:8080'
+const BASE = process.env.NEXT_PUBLIC_MGMT_API ?? 'https://localhost:8080'
 
 export interface Peer {
   id: string

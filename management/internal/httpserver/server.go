@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -49,7 +50,14 @@ func (s *Server) Run(addr string, tlsCfg *tls.Config) error {
 		return fmt.Errorf("TLS listen on %s: %w", addr, err)
 	}
 	log.Info().Str("addr", addr).Msg("HTTPS server starting")
-	return (&http.Server{Handler: s.router}).Serve(ln)
+	srv := &http.Server{
+		Handler:           s.router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	return srv.Serve(ln)
 }
 
 func (s *Server) registerRoutes() {
@@ -84,7 +92,8 @@ func (s *Server) listPeers(c *gin.Context) {
 	claims := claimsFromCtx(c)
 	peers, err := s.store.GetPeersByAccount(c.Request.Context(), claims.AccountID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("listPeers")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"peers": peers})
@@ -92,8 +101,19 @@ func (s *Server) listPeers(c *gin.Context) {
 
 func (s *Server) deletePeer(c *gin.Context) {
 	key := c.Param("key")
+	claims := claimsFromCtx(c)
+	peer, err := s.store.GetPeer(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "peer not found"})
+		return
+	}
+	if peer.AccountID != claims.AccountID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
 	if err := s.store.DeletePeer(c.Request.Context(), key); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("deletePeer")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -108,7 +128,6 @@ func (s *Server) setPeerRoutes(c *gin.Context) {
 		return
 	}
 
-	// Validate each CIDR.
 	for _, r := range req.Routes {
 		if _, _, err := net.ParseCIDR(r); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid CIDR: " + r})
@@ -131,7 +150,8 @@ func (s *Server) setPeerRoutes(c *gin.Context) {
 
 	peer.AdvertisedRoutes = req.Routes
 	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("setPeerRoutes save")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 
@@ -146,7 +166,8 @@ func (s *Server) listSetupKeys(c *gin.Context) {
 	claims := claimsFromCtx(c)
 	keys, err := s.store.GetSetupKeysByAccount(c.Request.Context(), claims.AccountID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("listSetupKeys")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"setup_keys": keys})
@@ -164,10 +185,11 @@ func (s *Server) createSetupKey(c *gin.Context) {
 	}
 
 	claims := claimsFromCtx(c)
-	expiry := 365 * 24 * time.Hour
-	if req.ExpiresIn > 0 {
-		expiry = time.Duration(req.ExpiresIn) * 24 * time.Hour
+	expiresIn := req.ExpiresIn
+	if expiresIn <= 0 || expiresIn > 365 {
+		expiresIn = 365
 	}
+	expiry := time.Duration(expiresIn) * 24 * time.Hour
 
 	sk := &domain.SetupKey{
 		ID:        uuid.NewString(),
@@ -180,7 +202,8 @@ func (s *Server) createSetupKey(c *gin.Context) {
 	}
 
 	if err := s.store.CreateSetupKey(c.Request.Context(), sk); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("createSetupKey")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 
@@ -197,11 +220,34 @@ func (s *Server) deleteSetupKey(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+var validProtocols = map[string]bool{"tcp": true, "udp": true, "icmp": true, "all": true}
+
+func validateRuleFields(src, dst, protocol string, port int) error {
+	for label, val := range map[string]string{"src": src, "dst": dst} {
+		if val == "*" {
+			continue
+		}
+		if net.ParseIP(val) == nil {
+			if _, _, err := net.ParseCIDR(val); err != nil {
+				return fmt.Errorf("%s must be '*', a valid IP, or a CIDR", label)
+			}
+		}
+	}
+	if !validProtocols[strings.ToLower(protocol)] {
+		return fmt.Errorf("protocol must be one of: tcp, udp, icmp, all")
+	}
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("port must be 0–65535")
+	}
+	return nil
+}
+
 func (s *Server) listRules(c *gin.Context) {
 	claims := claimsFromCtx(c)
 	rules, err := s.store.GetRulesByAccount(c.Request.Context(), claims.AccountID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("listRules")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"rules": rules})
@@ -226,6 +272,10 @@ func (s *Server) createRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "action must be 'allow' or 'deny'"})
 		return
 	}
+	if err := validateRuleFields(req.Src, req.Dst, req.Protocol, req.Port); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	claims := claimsFromCtx(c)
 	rule := &domain.Rule{
@@ -242,7 +292,8 @@ func (s *Server) createRule(c *gin.Context) {
 		CreatedAt: time.Now(),
 	}
 	if err := s.store.SaveRule(c.Request.Context(), rule); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("createRule")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	if s.notify != nil {
@@ -257,7 +308,8 @@ func (s *Server) updateRule(c *gin.Context) {
 
 	rules, err := s.store.GetRulesByAccount(c.Request.Context(), claims.AccountID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("updateRule fetch")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	var existing *domain.Rule
@@ -315,8 +367,14 @@ func (s *Server) updateRule(c *gin.Context) {
 		existing.Priority = *req.Priority
 	}
 
+	if err := validateRuleFields(existing.Src, existing.Dst, existing.Protocol, existing.Port); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	if err := s.store.SaveRule(c.Request.Context(), existing); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Error().Err(err).Msg("updateRule save")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	if s.notify != nil {

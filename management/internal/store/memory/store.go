@@ -23,24 +23,23 @@ type Store struct {
 
 var _ store.Store = (*Store)(nil)
 
-func New() *Store {
+func New(seedKey string) *Store {
 	s := &Store{
 		accounts:  make(map[string]*domain.Account),
 		setupKeys: make(map[string]*domain.SetupKey),
 		peers:     make(map[string]*domain.Peer),
 		rules:     make(map[string]*domain.Rule),
 	}
-	// Seed a default account and setup key so you can enroll immediately.
 	accountID := "default"
 	s.accounts[accountID] = &domain.Account{
 		ID:        accountID,
 		Name:      "Default",
 		CreatedAt: time.Now(),
 	}
-	s.setupKeys["MESHNET-DEFAULT-KEY"] = &domain.SetupKey{
+	s.setupKeys[seedKey] = &domain.SetupKey{
 		ID:        uuid.NewString(),
 		AccountID: accountID,
-		Key:       "MESHNET-DEFAULT-KEY",
+		Key:       seedKey,
 		Name:      "Default key",
 		Ephemeral: false,
 		CreatedAt: time.Now(),
@@ -136,6 +135,17 @@ func (s *Store) GetPeersByAccount(ctx context.Context, accountID string) ([]*dom
 			cp := *p
 			out = append(out, &cp)
 		}
+	}
+	return out, nil
+}
+
+func (s *Store) GetAllPeers(_ context.Context) ([]*domain.Peer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.Peer, 0, len(s.peers))
+	for _, p := range s.peers {
+		cp := *p
+		out = append(out, &cp)
 	}
 	return out, nil
 }

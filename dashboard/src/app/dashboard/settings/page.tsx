@@ -23,12 +23,10 @@ export default function SettingsPage() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
           <h2 className="font-semibold text-gray-900 mb-4">Setup Keys</h2>
           <p className="text-sm text-gray-500">
-            Setup keys are used to enroll new devices. Each device uses a key once.
+            Setup keys are used to enroll new devices. Manage and rotate keys from the{' '}
+            <a href="/dashboard/keys" className="text-brand-500 underline">Setup Keys</a> page.
+            The active key is printed to the server log on first startup — never share it publicly.
           </p>
-          <div className="mt-4 font-mono text-sm bg-gray-50 rounded-lg p-3 text-gray-700">
-            MESHNET-DEFAULT-KEY
-          </div>
-          <p className="text-xs text-orange-500 mt-2">Replace this key in production.</p>
         </div>
       </div>
     </div>
