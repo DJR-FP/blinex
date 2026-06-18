@@ -174,6 +174,77 @@ The agent uses userspace WireGuard (`wireguard-go`) instead of the kernel module
 
 ---
 
+## LXC Deployment (Proxmox / Incus / LXD)
+
+Meshnet runs well in LXC containers. The **server components** (management, signal, relay, dashboard) work in any standard unprivileged container with no special configuration. The **agent** creates a TUN interface and writes iptables rules, so it needs a small amount of extra kernel access.
+
+### Server components in LXC
+
+No special config required. Create a standard unprivileged Debian/Ubuntu container and run the Docker Compose stack or the binaries directly. The server only needs outbound network and the listening ports listed in [Firewall & Required Ports](#firewall--required-ports).
+
+### Agent in LXC
+
+The agent requires:
+- `/dev/net/tun` device access (to create the WireGuard TUN interface)
+- `NET_ADMIN` capability (for netlink routing and iptables)
+- IP forwarding on the host (only for exit node / subnet router mode)
+
+#### Option A — Unprivileged container (recommended)
+
+Add the following to the container config on the Proxmox host:
+
+**`/etc/pve/lxc/<id>.conf`** (or equivalent for Incus/LXD):
+
+```ini
+# Allow TUN device
+lxc.cgroup2.devices.allow: c 10:200 rwm
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+
+# Required for proc/sys visibility inside the container
+features: nesting=1
+```
+
+In the Proxmox web UI: Container → Options → Features → tick **Nesting**.
+
+Then inside the container, run the agent as root (or with `CAP_NET_ADMIN`):
+
+```bash
+sudo MESHNET_SETUP_KEY=<your-key> ./agent
+```
+
+#### Option B — Privileged container
+
+Enable **Privileged** mode in Proxmox (Container → Options → Unprivileged container → untick). No additional LXC config needed — all capabilities are available by default.
+
+> Privileged containers are less isolated. Use Option A where possible.
+
+#### IP forwarding for exit node / subnet router mode
+
+The agent enables IP forwarding automatically, but in an unprivileged LXC container the sysctl write may be blocked by the host. Set it persistently on the **Proxmox host** instead:
+
+```bash
+# On the Proxmox host (not inside the container)
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.d/99-meshnet.conf
+sysctl -p /etc/sysctl.d/99-meshnet.conf
+```
+
+#### Feature support matrix
+
+| Feature | Unprivileged LXC | Privileged LXC | Bare metal / VM |
+|---|---|---|---|
+| WireGuard TUN interface | ✅ (with TUN config above) | ✅ | ✅ |
+| Peer-to-peer connectivity | ✅ | ✅ | ✅ |
+| ACL iptables rules | ✅ | ✅ | ✅ |
+| Subnet routing | ✅ | ✅ | ✅ |
+| Exit node | ✅ (IP forwarding on host) | ✅ | ✅ |
+| Magic DNS | ✅ | ✅ | ✅ |
+
+#### iptables note
+
+iptables rules written inside an LXC container operate on the **host kernel's netfilter tables**. Rules added by the agent (the `MESHNET-ACL` chain) will be visible in the host's `iptables -L` output. This is normal — they are scoped to the container's network interface and do not affect other containers or the host's own traffic.
+
+---
+
 ## Quick Start
 
 ### Docker Compose (pre-built images)
