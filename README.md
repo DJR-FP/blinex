@@ -1,6 +1,6 @@
 # Meshnet
 
-[![Version](https://img.shields.io/badge/version-v0.4.0-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.5.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml)
@@ -209,21 +209,25 @@ overlay/
 |---|---|---|
 | `MGMT_GRPC_ADDR` | `:50051` | gRPC/TLS listen address |
 | `MGMT_HTTP_ADDR` | `:8080` | HTTPS REST API listen address |
-| `MGMT_JWT_SECRET` | `change-me` | JWT signing secret — **change in production** |
+| `MGMT_JWT_SECRET` | _(required)_ | JWT signing secret — min 32 chars, generate with `openssl rand -hex 32` |
 | `MGMT_NETWORK_CIDR` | `100.64.0.0/10` | CGNAT IP pool |
 | `MGMT_DNS_SUFFIX` | `mesh` | Magic DNS suffix |
+| `MGMT_ALLOWED_ORIGINS` | `http://localhost:3000` | Allowed CORS origins (comma-separated); set to your dashboard URL in production |
 | `DATABASE_URL` | _(empty = memory)_ | PostgreSQL DSN |
-| `MESHNET_DEFAULT_KEY` | `MESHNET-DEFAULT-KEY` | Seed setup key |
+| `MESHNET_DEFAULT_KEY` | _(random on startup)_ | Seed setup key; set to a fixed value to survive restarts |
 | `TLS_CERT_FILE` | _(empty = self-signed)_ | Path to TLS certificate PEM |
 | `TLS_KEY_FILE` | _(empty = self-signed)_ | Path to TLS private key PEM |
+| `GRPC_REFLECTION` | `false` | Set `true` to enable gRPC reflection (dev only) |
 
 ### Signal Server
 
 | Env var | Default | Description |
 |---|---|---|
 | `SIGNAL_ADDR` | `:10000` | gRPC/TLS listen address |
+| `MGMT_JWT_SECRET` | _(empty = no auth)_ | Set to the same value as management to require JWT on signal connections |
 | `TLS_CERT_FILE` | _(empty = self-signed)_ | Path to TLS certificate PEM |
 | `TLS_KEY_FILE` | _(empty = self-signed)_ | Path to TLS private key PEM |
+| `GRPC_REFLECTION` | `false` | Set `true` to enable gRPC reflection (dev only) |
 
 ### Agent
 
@@ -235,7 +239,8 @@ overlay/
 | `MESHNET_WG_IFACE` | `meshnet0` | TUN interface name |
 | `MESHNET_STATE_DIR` | `/var/lib/meshnet` | Key + token persistence dir |
 | `MESHNET_STUN_URLS` | `stun:stun.l.google.com:19302` | STUN/TURN URLs (comma-separated) |
-| `MESHNET_TLS_SKIP_VERIFY` | `true` | Skip server cert verification (safe for self-signed) |
+| `MESHNET_DNS_UPSTREAM` | `8.8.8.8:53` | Upstream DNS resolver for non-mesh queries |
+| `MESHNET_TLS_SKIP_VERIFY` | `true` | When `true` (default), TOFU fingerprint pinning is used instead of full CA validation |
 | `MESHNET_TLS_CA_CERT` | _(empty)_ | Path to CA cert PEM — pins a specific CA, disables skip-verify |
 
 ### Relay
@@ -261,7 +266,11 @@ No configuration needed. Both servers generate an in-memory ECDSA P-256 self-sig
 WARN using self-signed TLS certificate — set TLS_CERT_FILE + TLS_KEY_FILE for production
 ```
 
-Agents connect with `MESHNET_TLS_SKIP_VERIFY=true` (the default) so they accept self-signed certs. This prevents passive eavesdropping but does not defend against active MITM. Suitable for trusted private networks and home labs.
+Agents use **TOFU (Trust On First Use)** fingerprint pinning by default. On the first connection to each server, the certificate fingerprint is stored in `state.json`. Subsequent connections verify against the stored fingerprint — a changed certificate will be rejected until `state.json` is deleted. The fingerprint is logged at startup so you can verify it out-of-band:
+
+```
+INFO TOFU: pinned server certificate — verify this fingerprint on first use server=localhost:50051 fingerprint=3a4f8c1d...
+```
 
 ### Production: real certificates
 
@@ -434,6 +443,7 @@ buf generate
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
+- [x] **Security hardening** — HttpOnly cookie auth, TOFU cert pinning, gRPC rate limiting, JWT revocation on delete, signal server JWT auth, configurable CORS/DNS, 24h token expiry (v0.5.0)
 - [x] **Exit node OS routing** — split-tunnel /1 routes + host-route pinning for management/signal; no manual policy routing needed (v0.4.0)
 - [x] **Access control rules** — source/destination/protocol/port policy editor, iptables enforcement on agents (v0.3.0)
 - [x] TLS encryption on all control-plane connections (self-signed cert fallback) (v0.2.0)
