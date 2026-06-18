@@ -129,6 +129,51 @@ Pin a specific release: replace `:latest` with `:v0.3.0`.
 
 ---
 
+## System Requirements
+
+### Server (management + signal + relay)
+
+All three server components are single Go binaries with very low resource usage. They can run on the same host or be split across separate machines.
+
+| Component | Minimum | Recommended |
+|---|---|---|
+| **CPU** | 1 vCPU (x86-64 or ARM64) | 2 vCPU |
+| **RAM** | 256 MB | 1 GB |
+| **Disk** | 500 MB (binaries + logs) | 10 GB (PostgreSQL data) |
+| **Network** | 10 Mbps uplink | 100 Mbps+ uplink |
+| **OS** | Linux kernel 4.19+ | Linux kernel 5.10+ |
+| **Peers (in-memory store)** | up to ~500 | — |
+| **Peers (PostgreSQL)** | up to ~5,000 | up to ~50,000+ |
+
+> **Relay bandwidth note:** The relay server only carries traffic that cannot hole-punch directly. In typical deployments fewer than 20% of peer pairs need TURN relay. Size your uplink for that fraction of your expected concurrent traffic.
+
+#### Hosting options
+
+| | Notes |
+|---|---|
+| VPS (1 GB RAM, 1 vCPU) | Handles most small teams (< 100 peers) |
+| Dedicated server | Large networks, high-throughput exit nodes |
+| Docker / Compose | Simplest setup — all components in one `compose.yml` |
+| Kubernetes | Scale signal/relay horizontally; management needs shared PostgreSQL |
+
+### Client (agent)
+
+The agent uses userspace WireGuard (`wireguard-go`) instead of the kernel module for cross-platform NAT traversal via ICE. This uses slightly more CPU than kernel WireGuard but works everywhere without root access to kernel modules.
+
+| | Minimum | Recommended |
+|---|---|---|
+| **CPU** | Any 64-bit (x86-64, ARM64, ARMv7) | Modern 64-bit |
+| **RAM** | 64 MB free | 128 MB free |
+| **Disk** | 30 MB (agent binary + state) | 50 MB |
+| **OS** | Linux 4.19+, macOS 11+, Windows 10+ | Linux 5.10+ |
+| **Throughput** | ~100 Mbps (low-end ARM) | ~400–800 Mbps (modern x86) |
+
+> **Throughput note:** userspace WireGuard (`wireguard-go`) is CPU-bound. For high-throughput exit nodes or subnet routers, use a host with multiple cores or consider enabling kernel WireGuard if available on your platform.
+
+> **Exit node / subnet router:** Peers advertising routes also run iptables `MASQUERADE`. The advertising host needs IP forwarding enabled (the agent does this automatically) and sufficient CPU to handle routed traffic at wire speed.
+
+---
+
 ## Quick Start
 
 ### Docker Compose (pre-built images)
