@@ -1,3 +1,5 @@
+//go:build linux
+
 package wgmgr
 
 import "golang.org/x/sys/unix"

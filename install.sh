@@ -108,9 +108,33 @@ EOF
   info "Agent installed and started as meshnet-agent.service"
   info "Check status: systemctl status meshnet-agent"
   info "View logs:    journalctl -u meshnet-agent -f"
+elif [ "$OS" = "darwin" ]; then
+  PLIST="/Library/LaunchDaemons/io.meshnet.agent.plist"
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.meshnet.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${MESHNET_INSTALL_DIR}/meshnet-agent</string>
+    <string>-config</string>
+    <string>/etc/meshnet/agent.json</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/var/log/meshnet-agent.log</string>
+  <key>StandardOutPath</key><string>/var/log/meshnet-agent.log</string>
+</dict>
+</plist>
+EOF
+  launchctl load "$PLIST"
+  info "Agent installed and started as io.meshnet.agent"
+  info "View logs: tail -f /var/log/meshnet-agent.log"
 else
   info "Systemd not found. Start manually:"
-  info "  ${MESHNET_INSTALL_DIR}/meshnet-agent -config /etc/meshnet/agent.json"
+  info "  sudo ${MESHNET_INSTALL_DIR}/meshnet-agent -config /etc/meshnet/agent.json"
 fi
 
 info "Done! Your device will appear in the dashboard once connected."

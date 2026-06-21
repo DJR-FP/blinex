@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
-	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/tun/netstack"
@@ -33,8 +32,8 @@ type Manager struct {
 
 // New creates (or recreates) the named WireGuard interface using wireguard-go.
 // privKey is the persistent Curve25519 private key loaded from state.
-// If /dev/net/tun is unavailable (e.g. in unprivileged LXC), defers TUN
-// creation to SetAddress and uses a userspace netstack.
+// If /dev/net/tun is unavailable (e.g. in unprivileged LXC, Windows, macOS),
+// defers TUN creation to SetAddress and uses a userspace netstack.
 func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 	pubKeyArr := privKey.PublicKey()
 	pubKeyB64 := base64.StdEncoding.EncodeToString(pubKeyArr[:])
@@ -58,7 +57,6 @@ func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 	logger := device.NewLogger(device.LogLevelError, "[wg] ")
 	dev := device.NewDevice(tunDev, bind, logger)
 
-	// Configure private key. wireguard-go IPC uses lowercase hex.
 	privHex := hex.EncodeToString(privKey[:])
 	if err := dev.IpcSet(fmt.Sprintf("private_key=%s\nlisten_port=0\n", privHex)); err != nil {
 		tunDev.Close()
@@ -102,18 +100,7 @@ func (m *Manager) SetAddress(cidr string) error {
 	if m.netstackMode {
 		return m.initNetstack(cidr)
 	}
-	link, err := netlink.LinkByName(m.ifaceName)
-	if err != nil {
-		return fmt.Errorf("link %q not found: %w", m.ifaceName, err)
-	}
-	addr, err := netlink.ParseAddr(cidr)
-	if err != nil {
-		return fmt.Errorf("parsing %q: %w", cidr, err)
-	}
-	if err := netlink.AddrReplace(link, addr); err != nil {
-		return fmt.Errorf("setting address: %w", err)
-	}
-	return netlink.LinkSetUp(link)
+	return m.setKernelAddress(cidr)
 }
 
 // initNetstack creates the netstack TUN and WireGuard device now that we
@@ -151,8 +138,6 @@ func (m *Manager) initNetstack(cidr string) error {
 }
 
 // UpsertPeer adds or updates a WireGuard peer.
-// endpoint is "IP:port" of the ICE-established connection; pass "" to configure
-// the peer without an endpoint (WireGuard will wait for an incoming handshake).
 func (m *Manager) UpsertPeer(pubKeyB64 string, allowedIPs []string, endpoint string) error {
 	pubKeyRaw, err := base64.StdEncoding.DecodeString(pubKeyB64)
 	if err != nil {
@@ -204,10 +189,7 @@ func (m *Manager) Close() error {
 	}
 	m.bind.Close()
 	if !m.netstackMode {
-		link, err := netlink.LinkByName(m.ifaceName)
-		if err == nil {
-			_ = netlink.LinkDel(link)
-		}
+		m.cleanupKernelTUN()
 	}
 	return nil
 }
