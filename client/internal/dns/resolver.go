@@ -11,10 +11,10 @@ import (
 )
 
 // Resolver is a simple UDP DNS server that answers A queries for the mesh
-// domain (e.g. "laptop.alice.mesh") and forwards everything else upstream.
+// domain (e.g. "laptop.alice.blinex") and forwards everything else upstream.
 type Resolver struct {
 	listenAddr string
-	suffix     string // e.g. "mesh" — without the trailing dot
+	suffix     string // e.g. "blinex" — without the trailing dot
 	upstream   string // e.g. "8.8.8.8:53"
 
 	mu      sync.RWMutex

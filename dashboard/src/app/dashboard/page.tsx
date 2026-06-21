@@ -38,7 +38,7 @@ export default function DevicesPage() {
   }
 
   const connected = peers.filter(p => p.connected).length
-  const installCmd = `curl -fsSL https://install.meshnet.io/agent | MESHNET_SETUP_KEY=<your-key> bash`
+  const installCmd = `curl -fsSL https://install.blinex.co.uk/agent | BLINEX_SETUP_KEY=<your-key> bash`
 
   return (
     <div>

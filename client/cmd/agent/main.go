@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/meshnet/client/internal/config"
-	"github.com/meshnet/client/internal/engine"
+	"github.com/blinex/client/internal/config"
+	"github.com/blinex/client/internal/engine"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -16,11 +16,11 @@ import (
 var version = "dev"
 
 func main() {
-	cfgPath := flag.String("config", "", "path to agent config JSON (default: /etc/meshnet/agent.json)")
+	cfgPath := flag.String("config", "", "path to agent config JSON (default: /etc/blinex/agent.json)")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	log.Info().Str("version", version).Msg("meshnet agent starting")
+	log.Info().Str("version", version).Msg("blinex agent starting")
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -35,7 +35,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	log.Info().Msg("meshnet agent starting")
+	log.Info().Msg("blinex agent starting")
 	if err := eng.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatal().Err(err).Msg("agent error")
 	}

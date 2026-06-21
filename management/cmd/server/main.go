@@ -9,15 +9,15 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 
-	managementv1 "github.com/meshnet/gen/management/v1"
-	"github.com/meshnet/management/internal/auth"
-	"github.com/meshnet/management/internal/config"
-	"github.com/meshnet/management/internal/grpcserver"
-	"github.com/meshnet/management/internal/httpserver"
-	"github.com/meshnet/management/internal/store"
-	"github.com/meshnet/management/internal/store/memory"
-	"github.com/meshnet/management/internal/store/postgres"
-	"github.com/meshnet/management/internal/tlsconfig"
+	managementv1 "github.com/blinex/gen/management/v1"
+	"github.com/blinex/management/internal/auth"
+	"github.com/blinex/management/internal/config"
+	"github.com/blinex/management/internal/grpcserver"
+	"github.com/blinex/management/internal/httpserver"
+	"github.com/blinex/management/internal/store"
+	"github.com/blinex/management/internal/store/memory"
+	"github.com/blinex/management/internal/store/postgres"
+	"github.com/blinex/management/internal/tlsconfig"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -27,7 +27,7 @@ var version = "dev"
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	log.Info().Str("version", version).Msg("meshnet management starting")
+	log.Info().Str("version", version).Msg("blinex management starting")
 
 	cfg := config.Load()
 

@@ -4,7 +4,7 @@ import (
 	"io"
 	"sync"
 
-	signalv1 "github.com/meshnet/gen/signal/v1"
+	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

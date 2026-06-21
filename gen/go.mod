@@ -1,4 +1,4 @@
-module github.com/meshnet/gen
+module github.com/blinex/gen
 
 go 1.25.0
 

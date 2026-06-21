@@ -6,7 +6,7 @@
 docker pull ghcr.io/djr-fp/overlay/management:latest
 ```
 
-Management server — the control plane for Meshnet. Handles device enrollment, IP allocation, peer list distribution, and the REST API consumed by the dashboard.
+Management server — the control plane for Bline-X. Handles device enrollment, IP allocation, peer list distribution, and the REST API consumed by the dashboard.
 
 ## Responsibilities
 
@@ -67,6 +67,6 @@ management/
 | `MGMT_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `MGMT_JWT_SECRET` | `change-me-in-production` | JWT HMAC secret |
 | `MGMT_NETWORK_CIDR` | `100.64.0.0/10` | IP pool for peer allocation |
-| `MGMT_DNS_SUFFIX` | `mesh` | Magic DNS suffix |
+| `MGMT_DNS_SUFFIX` | `blinex` | Magic DNS suffix |
 | `DATABASE_URL` | _(empty)_ | PostgreSQL DSN; empty = in-memory |
-| `MESHNET_DEFAULT_KEY` | `MESHNET-DEFAULT-KEY` | Setup key seeded at startup |
+| `BLINEX_DEFAULT_KEY` | `BLINEX-DEFAULT-KEY` | Setup key seeded at startup |

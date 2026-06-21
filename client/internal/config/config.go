@@ -13,7 +13,7 @@ type Config struct {
 	ManagementURL string   `json:"management_url"` // e.g. "localhost:50051"
 	SignalURL     string   `json:"signal_url"`     // e.g. "localhost:10000"
 	SetupKey      string   `json:"setup_key"`
-	WGInterface   string   `json:"wg_interface"` // e.g. "meshnet0"
+	WGInterface   string   `json:"wg_interface"` // e.g. "blinex0"
 	StateDir      string   `json:"state_dir"`    // dir for state.json
 	STUNURLs      []string `json:"stun_urls"`    // e.g. ["stun:stun.l.google.com:19302"]
 	LogLevel      string   `json:"log_level"`
@@ -28,22 +28,22 @@ type Config struct {
 
 func Load(path string) (*Config, error) {
 	if path == "" {
-		path = "/etc/meshnet/agent.json"
+		path = "/etc/blinex/agent.json"
 	}
 
 	cfg := &Config{
-		ManagementURL: getEnv("MESHNET_MANAGEMENT_URL", "localhost:50051"),
-		SignalURL:     getEnv("MESHNET_SIGNAL_URL", "localhost:10000"),
-		SetupKey:      getEnv("MESHNET_SETUP_KEY", ""),
-		WGInterface:   getEnv("MESHNET_WG_IFACE", "meshnet0"),
-		StateDir:      getEnv("MESHNET_STATE_DIR", "/var/lib/meshnet"),
+		ManagementURL: getEnv("BLINEX_MANAGEMENT_URL", "localhost:50051"),
+		SignalURL:     getEnv("BLINEX_SIGNAL_URL", "localhost:10000"),
+		SetupKey:      getEnv("BLINEX_SETUP_KEY", ""),
+		WGInterface:   getEnv("BLINEX_WG_IFACE", "blinex0"),
+		StateDir:      getEnv("BLINEX_STATE_DIR", "/var/lib/blinex"),
 		LogLevel:      getEnv("LOG_LEVEL", "info"),
-		STUNURLs:      parseList(getEnv("MESHNET_STUN_URLS", "stun:stun.l.google.com:19302")),
-		DNSUpstream:   getEnv("MESHNET_DNS_UPSTREAM", "8.8.8.8:53"),
+		STUNURLs:      parseList(getEnv("BLINEX_STUN_URLS", "stun:stun.l.google.com:19302")),
+		DNSUpstream:   getEnv("BLINEX_DNS_UPSTREAM", "8.8.8.8:53"),
 		// Default to skip-verify so the agent works with self-signed server certs.
 		// TOFU fingerprint pinning is used automatically in this mode.
-		TLSSkipVerify: getEnv("MESHNET_TLS_SKIP_VERIFY", "true") != "false",
-		TLSCACert:     getEnv("MESHNET_TLS_CA_CERT", ""),
+		TLSSkipVerify: getEnv("BLINEX_TLS_SKIP_VERIFY", "true") != "false",
+		TLSCACert:     getEnv("BLINEX_TLS_CA_CERT", ""),
 	}
 
 	if _, err := os.Stat(path); err == nil {
@@ -57,7 +57,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	if cfg.SetupKey == "" {
-		return nil, fmt.Errorf("setup key required (set MESHNET_SETUP_KEY or setup_key in config)")
+		return nil, fmt.Errorf("setup key required (set BLINEX_SETUP_KEY or setup_key in config)")
 	}
 
 	return cfg, nil

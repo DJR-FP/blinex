@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/meshnet/management/internal/auth"
-	"github.com/meshnet/management/internal/domain"
-	"github.com/meshnet/management/internal/store"
-	commonv1 "github.com/meshnet/gen/common/v1"
-	managementv1 "github.com/meshnet/gen/management/v1"
+	"github.com/blinex/management/internal/auth"
+	"github.com/blinex/management/internal/domain"
+	"github.com/blinex/management/internal/store"
+	commonv1 "github.com/blinex/gen/common/v1"
+	managementv1 "github.com/blinex/gen/management/v1"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	grpcpeer "google.golang.org/grpc/peer"
@@ -33,7 +33,7 @@ type Server struct {
 	auth        *auth.Manager
 	ipam        *IPAM
 	network     string // full mesh CIDR, e.g. "100.64.0.0/10"
-	dns         string // dns suffix, e.g. "mesh"
+	dns         string // dns suffix, e.g. "blinex"
 	loginLimits *rateLimiter
 
 	subsMu sync.RWMutex

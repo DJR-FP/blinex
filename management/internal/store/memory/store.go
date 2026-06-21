@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/meshnet/management/internal/domain"
-	"github.com/meshnet/management/internal/store"
+	"github.com/blinex/management/internal/domain"
+	"github.com/blinex/management/internal/store"
 )
 
 // Store is a thread-safe in-memory implementation of store.Store.

@@ -25,7 +25,7 @@ export function Sidebar() {
   return (
     <aside className="w-56 bg-gray-900 text-white flex flex-col h-screen sticky top-0">
       <div className="px-6 py-5 border-b border-gray-700">
-        <span className="text-xl font-bold tracking-tight">Meshnet</span>
+        <span className="text-xl font-bold tracking-tight">Bline-X</span>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">

@@ -29,7 +29,7 @@ type Peer struct {
 	Hostname      string                 `protobuf:"bytes,4,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	Os            string                 `protobuf:"bytes,5,opt,name=os,proto3" json:"os,omitempty"`
 	AllowedIps    []string               `protobuf:"bytes,6,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
-	DnsLabel      string                 `protobuf:"bytes,7,opt,name=dns_label,json=dnsLabel,proto3" json:"dns_label,omitempty"` // e.g. "laptop" in laptop.alice.mesh
+	DnsLabel      string                 `protobuf:"bytes,7,opt,name=dns_label,json=dnsLabel,proto3" json:"dns_label,omitempty"` // e.g. "laptop" in laptop.alice.blinex
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -603,7 +603,7 @@ const file_common_v1_types_proto_rawDesc = "" +
 	"\x04port\x18\x06 \x01(\x05R\x04port\x12\x16\n" +
 	"\x06action\x18\a \x01(\tR\x06action\x12\x18\n" +
 	"\aenabled\x18\b \x01(\bR\aenabled\x12\x1a\n" +
-	"\bpriority\x18\t \x01(\x05R\bpriorityB+Z)github.com/meshnet/gen/common/v1;commonv1b\x06proto3"
+	"\bpriority\x18\t \x01(\x05R\bpriorityB+Z)github.com/blinex/gen/common/v1;commonv1b\x06proto3"
 
 var (
 	file_common_v1_types_proto_rawDescOnce sync.Once

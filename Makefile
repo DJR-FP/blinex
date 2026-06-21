@@ -55,7 +55,7 @@ run-relay:
 	RELAY_PUBLIC_IP=127.0.0.1 $(GO) run ./relay/cmd/server
 
 run-agent:
-	MESHNET_SETUP_KEY=MESHNET-DEFAULT-KEY $(GO) run ./client/cmd/agent
+	BLINEX_SETUP_KEY=BLINEX-DEFAULT-KEY $(GO) run ./client/cmd/agent
 
 ## ─── Dashboard ───────────────────────────────────────────────────────────────────
 

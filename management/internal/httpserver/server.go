@@ -13,9 +13,9 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/meshnet/management/internal/auth"
-	"github.com/meshnet/management/internal/domain"
-	"github.com/meshnet/management/internal/store"
+	"github.com/blinex/management/internal/auth"
+	"github.com/blinex/management/internal/domain"
+	"github.com/blinex/management/internal/store"
 	"github.com/rs/zerolog/log"
 )
 

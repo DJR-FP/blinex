@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package signal.v1;
 
-option go_package = "github.com/meshnet/gen/signal/v1;signalv1";
+option go_package = "github.com/blinex/gen/signal/v1;signalv1";
 
 service SignalService {
   // Bidirectional stream used by peers to exchange ICE candidates and

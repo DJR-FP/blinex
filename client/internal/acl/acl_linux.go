@@ -7,13 +7,13 @@ import (
 	"os/exec"
 	"strings"
 
-	commonv1 "github.com/meshnet/gen/common/v1"
+	commonv1 "github.com/blinex/gen/common/v1"
 	"github.com/rs/zerolog/log"
 )
 
-const chain = "MESHNET-ACL"
+const chain = "BLINEX-ACL"
 
-// EnsureChain creates the MESHNET-ACL iptables chain and jumps to it from
+// EnsureChain creates the BLINEX-ACL iptables chain and jumps to it from
 // INPUT and FORWARD if not already present.
 func EnsureChain(iface string) error {
 	// Create chain (ignore error if it already exists)
@@ -34,7 +34,7 @@ func EnsureChain(iface string) error {
 	return nil
 }
 
-// ApplyRules flushes the MESHNET-ACL chain and reinstalls rules in priority order.
+// ApplyRules flushes the BLINEX-ACL chain and reinstalls rules in priority order.
 // Only enabled rules are installed. If no deny rules exist the default is allow-all.
 func ApplyRules(rules []*commonv1.Rule, iface string) error {
 	// Flush existing rules
@@ -65,7 +65,7 @@ func ApplyRules(rules []*commonv1.Rule, iface string) error {
 	return nil
 }
 
-// RemoveChain tears down the MESHNET-ACL chain completely.
+// RemoveChain tears down the BLINEX-ACL chain completely.
 func RemoveChain(iface string) {
 	run("iptables", "-D", "INPUT", "-i", iface, "-j", chain)
 	run("iptables", "-D", "FORWARD", "-i", iface, "-j", chain)

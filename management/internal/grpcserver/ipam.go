@@ -6,7 +6,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/meshnet/management/internal/domain"
+	"github.com/blinex/management/internal/domain"
 )
 
 // IPAM allocates IPs from a CGNAT block (default: 100.64.0.0/10).

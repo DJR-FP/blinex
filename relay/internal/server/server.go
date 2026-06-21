@@ -11,7 +11,7 @@ import (
 type Config struct {
 	PublicIP  string // public IP of this relay server
 	UDPPort   int    // TURN/STUN UDP port (default 3478)
-	Realm     string // TURN realm (e.g. "meshnet.io")
+	Realm     string // TURN realm (e.g. "blinex.co.uk")
 	AuthUser  string // TURN long-term credential user
 	AuthPass  string // TURN long-term credential password
 }

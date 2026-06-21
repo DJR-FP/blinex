@@ -3,7 +3,7 @@ package peer
 import (
 	"sync"
 
-	commonv1 "github.com/meshnet/gen/common/v1"
+	commonv1 "github.com/blinex/gen/common/v1"
 	"github.com/rs/zerolog/log"
 )
 

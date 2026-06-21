@@ -1,9 +1,9 @@
-module github.com/meshnet/signal
+module github.com/blinex/signal
 
 go 1.25.0
 
 require (
-	github.com/meshnet/gen v0.0.0
+	github.com/blinex/gen v0.0.0
 	github.com/rs/zerolog v1.33.0
 	google.golang.org/grpc v1.65.0
 )
@@ -18,4 +18,4 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 )
 
-replace github.com/meshnet/gen => ../gen
+replace github.com/blinex/gen => ../gen

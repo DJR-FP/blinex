@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   const response = NextResponse.json({ ok: true })
-  response.cookies.set('meshnet_token', token, {
+  response.cookies.set('blinex_token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
@@ -48,6 +48,6 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   const response = NextResponse.json({ ok: true })
-  response.cookies.delete('meshnet_token')
+  response.cookies.delete('blinex_token')
   return response
 }

@@ -5,8 +5,8 @@ import (
 	"crypto/tls"
 	"fmt"
 
-	commonv1 "github.com/meshnet/gen/common/v1"
-	managementv1 "github.com/meshnet/gen/management/v1"
+	commonv1 "github.com/blinex/gen/common/v1"
+	managementv1 "github.com/blinex/gen/management/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"

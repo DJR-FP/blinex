@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/meshnet/management/internal/auth"
+	"github.com/blinex/management/internal/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"

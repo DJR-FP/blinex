@@ -44,7 +44,7 @@ export default function LoginPage() {
                 d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Meshnet</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Bline-X</h1>
           <p className="text-gray-500 mt-1">Sign in to your network</p>
         </div>
 
@@ -120,7 +120,7 @@ export default function LoginPage() {
                 required
               />
               <p className="text-xs text-gray-400 mt-1">
-                Run the agent with <code className="bg-gray-100 px-1 rounded">MESHNET_SETUP_KEY=...</code> to get a token.
+                Run the agent with <code className="bg-gray-100 px-1 rounded">BLINEX_SETUP_KEY=...</code> to get a token.
               </p>
             </div>
           )}

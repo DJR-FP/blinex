@@ -4,7 +4,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/meshnet/relay/internal/server"
+	"github.com/blinex/relay/internal/server"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -13,13 +13,13 @@ var version = "dev"
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	log.Info().Str("version", version).Msg("meshnet relay starting")
+	log.Info().Str("version", version).Msg("blinex relay starting")
 
 	cfg := server.Config{
 		PublicIP: getEnv("RELAY_PUBLIC_IP", "127.0.0.1"),
 		UDPPort:  getEnvInt("RELAY_UDP_PORT", 3478),
-		Realm:    getEnv("RELAY_REALM", "meshnet.io"),
-		AuthUser: getEnv("RELAY_AUTH_USER", "meshnet"),
+		Realm:    getEnv("RELAY_REALM", "blinex.co.uk"),
+		AuthUser: getEnv("RELAY_AUTH_USER", "blinex"),
 		AuthPass: getEnv("RELAY_AUTH_PASS", "change-me"),
 	}
 

@@ -1,4 +1,4 @@
-module github.com/meshnet/relay
+module github.com/blinex/relay
 
 go 1.25.0
 

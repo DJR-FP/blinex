@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package common.v1;
 
-option go_package = "github.com/meshnet/gen/common/v1;commonv1";
+option go_package = "github.com/blinex/gen/common/v1;commonv1";
 
 message Peer {
   string id          = 1;
@@ -11,7 +11,7 @@ message Peer {
   string hostname    = 4;
   string os          = 5;
   repeated string allowed_ips = 6;
-  string dns_label   = 7; // e.g. "laptop" in laptop.alice.mesh
+  string dns_label   = 7; // e.g. "laptop" in laptop.alice.blinex
 }
 
 message PeerMeta {

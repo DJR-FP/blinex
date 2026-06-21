@@ -9,7 +9,7 @@ import (
 
 	pion "github.com/pion/ice/v2"
 	"github.com/pion/stun"
-	signalv1 "github.com/meshnet/gen/signal/v1"
+	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/rs/zerolog/log"
 )
 

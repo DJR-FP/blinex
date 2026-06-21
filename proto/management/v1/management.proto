@@ -4,7 +4,7 @@ package management.v1;
 
 import "common/v1/types.proto";
 
-option go_package = "github.com/meshnet/gen/management/v1;managementv1";
+option go_package = "github.com/blinex/gen/management/v1;managementv1";
 
 service ManagementService {
   // Pre-auth: fetch the server's WireGuard public key.

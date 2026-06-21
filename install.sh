@@ -1,32 +1,32 @@
 #!/bin/bash
 set -euo pipefail
 
-# Meshnet Agent Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/DJR-FP/meshagent/main/install.sh | sudo MESHNET_SETUP_KEY=<key> bash
-# Or:    sudo MESHNET_SETUP_KEY=<key> MESHNET_MANAGEMENT_URL=<host:50051> ./install.sh
+# Bline-X Agent Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/install.sh | sudo BLINEX_SETUP_KEY=<key> bash
+# Or:    sudo BLINEX_SETUP_KEY=<key> BLINEX_MANAGEMENT_URL=<host:50051> ./install.sh
 
-MESHNET_SETUP_KEY="${MESHNET_SETUP_KEY:-}"
-MESHNET_MANAGEMENT_URL="${MESHNET_MANAGEMENT_URL:-localhost:50051}"
-MESHNET_SIGNAL_URL="${MESHNET_SIGNAL_URL:-localhost:10000}"
-MESHNET_WG_IFACE="${MESHNET_WG_IFACE:-meshnet0}"
-MESHNET_STATE_DIR="${MESHNET_STATE_DIR:-/var/lib/meshnet}"
-MESHNET_INSTALL_DIR="${MESHNET_INSTALL_DIR:-/usr/local/bin}"
-MESHNET_SERVICE_DIR="${MESHNET_SERVICE_DIR:-/etc/systemd/system}"
-GITHUB_REPO="DJR-FP/meshagent"
-VERSION="${MESHNET_VERSION:-latest}"
+BLINEX_SETUP_KEY="${BLINEX_SETUP_KEY:-}"
+BLINEX_MANAGEMENT_URL="${BLINEX_MANAGEMENT_URL:-localhost:50051}"
+BLINEX_SIGNAL_URL="${BLINEX_SIGNAL_URL:-localhost:10000}"
+BLINEX_WG_IFACE="${BLINEX_WG_IFACE:-blinex0}"
+BLINEX_STATE_DIR="${BLINEX_STATE_DIR:-/var/lib/blinex}"
+BLINEX_INSTALL_DIR="${BLINEX_INSTALL_DIR:-/usr/local/bin}"
+BLINEX_SERVICE_DIR="${BLINEX_SERVICE_DIR:-/etc/systemd/system}"
+GITHUB_REPO="DJR-FP/blinex-agent"
+VERSION="${BLINEX_VERSION:-latest}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-info()  { echo -e "${GREEN}[meshnet]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[meshnet]${NC} $*"; }
-error() { echo -e "${RED}[meshnet]${NC} $*" >&2; exit 1; }
+info()  { echo -e "${GREEN}[blinex]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[blinex]${NC} $*"; }
+error() { echo -e "${RED}[blinex]${NC} $*" >&2; exit 1; }
 
 # Checks
 [[ $EUID -ne 0 ]] && error "Please run as root (sudo $0)"
-[[ -z "$MESHNET_SETUP_KEY" ]] && error "MESHNET_SETUP_KEY is required"
+[[ -z "$BLINEX_SETUP_KEY" ]] && error "BLINEX_SETUP_KEY is required"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -37,7 +37,7 @@ case "$ARCH" in
   *)       error "Unsupported architecture: $ARCH" ;;
 esac
 
-info "Installing Meshnet agent ($OS/$ARCH)…"
+info "Installing Bline-X agent ($OS/$ARCH)…"
 
 # Install WireGuard tools if missing
 if ! command -v wg &>/dev/null; then
@@ -59,42 +59,42 @@ if [ "$VERSION" = "latest" ]; then
   [[ -z "$VERSION" ]] && error "Could not determine latest version"
 fi
 info "Version: ${VERSION}"
-BINARY_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/meshnet-agent-${OS}-${ARCH}"
+BINARY_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/blinex-agent-${OS}-${ARCH}"
 info "Downloading agent from ${BINARY_URL}…"
-curl -fsSL -o /tmp/meshnet-agent "${BINARY_URL}" || {
+curl -fsSL -o /tmp/blinex-agent "${BINARY_URL}" || {
   warn "GitHub release not found. Building from source is required for now."
   warn "See: https://github.com/${GITHUB_REPO}#building"
   exit 1
 }
-chmod +x /tmp/meshnet-agent
-mv /tmp/meshnet-agent "${MESHNET_INSTALL_DIR}/meshnet-agent"
+chmod +x /tmp/blinex-agent
+mv /tmp/blinex-agent "${BLINEX_INSTALL_DIR}/blinex-agent"
 
 # Create state and config dirs
-mkdir -p "${MESHNET_STATE_DIR}" /etc/meshnet
+mkdir -p "${BLINEX_STATE_DIR}" /etc/blinex
 
 # Write config
-cat > /etc/meshnet/agent.json <<EOF
+cat > /etc/blinex/agent.json <<EOF
 {
-  "management_url": "${MESHNET_MANAGEMENT_URL}",
-  "signal_url": "${MESHNET_SIGNAL_URL}",
-  "setup_key": "${MESHNET_SETUP_KEY}",
-  "wg_interface": "${MESHNET_WG_IFACE}",
-  "state_dir": "${MESHNET_STATE_DIR}"
+  "management_url": "${BLINEX_MANAGEMENT_URL}",
+  "signal_url": "${BLINEX_SIGNAL_URL}",
+  "setup_key": "${BLINEX_SETUP_KEY}",
+  "wg_interface": "${BLINEX_WG_IFACE}",
+  "state_dir": "${BLINEX_STATE_DIR}"
 }
 EOF
-chmod 600 /etc/meshnet/agent.json
+chmod 600 /etc/blinex/agent.json
 
 # Write systemd service
 if command -v systemctl &>/dev/null; then
-  cat > "${MESHNET_SERVICE_DIR}/meshnet-agent.service" <<EOF
+  cat > "${BLINEX_SERVICE_DIR}/blinex-agent.service" <<EOF
 [Unit]
-Description=Meshnet Agent
+Description=Bline-X Agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${MESHNET_INSTALL_DIR}/meshnet-agent -config /etc/meshnet/agent.json
+ExecStart=${BLINEX_INSTALL_DIR}/blinex-agent -config /etc/blinex/agent.json
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -104,37 +104,37 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable --now meshnet-agent
-  info "Agent installed and started as meshnet-agent.service"
-  info "Check status: systemctl status meshnet-agent"
-  info "View logs:    journalctl -u meshnet-agent -f"
+  systemctl enable --now blinex-agent
+  info "Agent installed and started as blinex-agent.service"
+  info "Check status: systemctl status blinex-agent"
+  info "View logs:    journalctl -u blinex-agent -f"
 elif [ "$OS" = "darwin" ]; then
-  PLIST="/Library/LaunchDaemons/io.meshnet.agent.plist"
+  PLIST="/Library/LaunchDaemons/io.blinex.agent.plist"
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>io.meshnet.agent</string>
+  <key>Label</key><string>io.blinex.agent</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${MESHNET_INSTALL_DIR}/meshnet-agent</string>
+    <string>${BLINEX_INSTALL_DIR}/blinex-agent</string>
     <string>-config</string>
-    <string>/etc/meshnet/agent.json</string>
+    <string>/etc/blinex/agent.json</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/var/log/meshnet-agent.log</string>
-  <key>StandardOutPath</key><string>/var/log/meshnet-agent.log</string>
+  <key>StandardErrorPath</key><string>/var/log/blinex-agent.log</string>
+  <key>StandardOutPath</key><string>/var/log/blinex-agent.log</string>
 </dict>
 </plist>
 EOF
   launchctl load "$PLIST"
-  info "Agent installed and started as io.meshnet.agent"
-  info "View logs: tail -f /var/log/meshnet-agent.log"
+  info "Agent installed and started as io.blinex.agent"
+  info "View logs: tail -f /var/log/blinex-agent.log"
 else
   info "Systemd not found. Start manually:"
-  info "  sudo ${MESHNET_INSTALL_DIR}/meshnet-agent -config /etc/meshnet/agent.json"
+  info "  sudo ${BLINEX_INSTALL_DIR}/blinex-agent -config /etc/blinex/agent.json"
 fi
 
 info "Done! Your device will appear in the dashboard once connected."

@@ -1,4 +1,4 @@
-# Meshnet
+# Bline-X
 
 [![Version](https://img.shields.io/badge/version-v0.5.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
@@ -12,7 +12,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 ## Features
 
 - **Automatic NAT traversal** — ICE hole-punching (STUN) with TURN relay fallback; works across most NATs without port forwarding
-- **Stable IPs** — every device gets a permanent CGNAT IP (`100.64.x.x`) and a Magic DNS hostname (`device.mesh`)
+- **Stable IPs** — every device gets a permanent CGNAT IP (`100.64.x.x`) and a Magic DNS hostname (`device.blinex`)
 - **TLS encrypted control plane** — management and signal servers are TLS by default; self-signed cert generated automatically if none is provided
 - **Exit node / subnet routing** — advertise a LAN subnet or full exit node through any mesh device; toggle per device in the dashboard
 - **Access control rules** — source/destination/protocol/port policy editor; rules pushed to agents and enforced with iptables
@@ -39,12 +39,12 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
               ▲                         ▲
               │ gRPC/TLS                │ gRPC/TLS
               ▼                         ▼
-┌──────────── Device (meshnet-agent) ──────────────────────────────────┐
+┌──────────── Device (blinex-agent) ──────────────────────────────────┐
 │                                                                       │
-│  wireguard-go userspace TUN (meshnet0)                                │
+│  wireguard-go userspace TUN (blinex0)                                │
 │  └── IceBind  routes WireGuard packets through ICE net.Conn          │
 │  pion/ice  per-peer NAT traversal agents                              │
-│  Magic DNS  127.0.0.1:53535  →  hostname.mesh                        │
+│  Magic DNS  127.0.0.1:53535  →  hostname.blinex                        │
 │  Subnet / exit node routing  (netlink + iptables MASQUERADE)         │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
@@ -177,7 +177,7 @@ The agent uses userspace WireGuard (`wireguard-go`) instead of the kernel module
 
 ## LXC Deployment (Proxmox / Incus / LXD)
 
-Meshnet runs well in LXC containers. The **server components** (management, signal, relay, dashboard) work in any standard unprivileged container with no special configuration. The **agent** creates a TUN interface and writes iptables rules, so it needs a small amount of extra kernel access.
+Bline-X runs well in LXC containers. The **server components** (management, signal, relay, dashboard) work in any standard unprivileged container with no special configuration. The **agent** creates a TUN interface and writes iptables rules, so it needs a small amount of extra kernel access.
 
 ### Server components in LXC
 
@@ -210,7 +210,7 @@ In the Proxmox web UI: Container → Options → Features → tick **Nesting**.
 Then inside the container, run the agent as root (or with `CAP_NET_ADMIN`):
 
 ```bash
-sudo MESHNET_SETUP_KEY=<your-key> ./agent
+sudo BLINEX_SETUP_KEY=<your-key> ./agent
 ```
 
 #### Option B — Privileged container
@@ -225,8 +225,8 @@ The agent enables IP forwarding automatically, but in an unprivileged LXC contai
 
 ```bash
 # On the Proxmox host (not inside the container)
-echo "net.ipv4.ip_forward=1" >> /etc/sysctl.d/99-meshnet.conf
-sysctl -p /etc/sysctl.d/99-meshnet.conf
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.d/99-blinex.conf
+sysctl -p /etc/sysctl.d/99-blinex.conf
 ```
 
 #### Feature support matrix
@@ -242,7 +242,7 @@ sysctl -p /etc/sysctl.d/99-meshnet.conf
 
 #### iptables note
 
-iptables rules written inside an LXC container operate on the **host kernel's netfilter tables**. Rules added by the agent (the `MESHNET-ACL` chain) will be visible in the host's `iptables -L` output. This is normal — they are scoped to the container's network interface and do not affect other containers or the host's own traffic.
+iptables rules written inside an LXC container operate on the **host kernel's netfilter tables**. Rules added by the agent (the `BLINEX-ACL` chain) will be visible in the host's `iptables -L` output. This is normal — they are scoped to the container's network interface and do not affect other containers or the host's own traffic.
 
 ---
 
@@ -274,8 +274,8 @@ docker compose up -d
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DJR-FP/overlay/main/install.sh | \
-  MESHNET_SETUP_KEY=MESHNET-DEFAULT-KEY \
-  MESHNET_MANAGEMENT_URL=your-server:50051 \
+  BLINEX_SETUP_KEY=BLINEX-DEFAULT-KEY \
+  BLINEX_MANAGEMENT_URL=your-server:50051 \
   bash
 ```
 
@@ -292,7 +292,7 @@ make build
 # Start services
 MGMT_JWT_SECRET=dev ./bin/management   &   # terminal 1
 ./bin/signal                            &   # terminal 2
-sudo MESHNET_SETUP_KEY=MESHNET-DEFAULT-KEY ./bin/agent  # terminal 3
+sudo BLINEX_SETUP_KEY=BLINEX-DEFAULT-KEY ./bin/agent  # terminal 3
 
 # Dashboard
 cd dashboard && npm install && npm run dev   # http://localhost:3000
@@ -363,10 +363,10 @@ overlay/
 | `MGMT_HTTP_ADDR` | `:8080` | HTTPS REST API listen address |
 | `MGMT_JWT_SECRET` | _(required)_ | JWT signing secret — min 32 chars, generate with `openssl rand -hex 32` |
 | `MGMT_NETWORK_CIDR` | `100.64.0.0/10` | CGNAT IP pool |
-| `MGMT_DNS_SUFFIX` | `mesh` | Magic DNS suffix |
+| `MGMT_DNS_SUFFIX` | `blinex` | Magic DNS suffix |
 | `MGMT_ALLOWED_ORIGINS` | `http://localhost:3000` | Allowed CORS origins (comma-separated); set to your dashboard URL in production |
 | `DATABASE_URL` | _(empty = memory)_ | PostgreSQL DSN |
-| `MESHNET_DEFAULT_KEY` | _(random on startup)_ | Seed setup key; set to a fixed value to survive restarts |
+| `BLINEX_DEFAULT_KEY` | _(random on startup)_ | Seed setup key; set to a fixed value to survive restarts |
 | `TLS_CERT_FILE` | _(empty = self-signed)_ | Path to TLS certificate PEM |
 | `TLS_KEY_FILE` | _(empty = self-signed)_ | Path to TLS private key PEM |
 | `GRPC_REFLECTION` | `false` | Set `true` to enable gRPC reflection (dev only) |
@@ -387,15 +387,15 @@ overlay/
 
 | Env var | Default | Description |
 |---|---|---|
-| `MESHNET_SETUP_KEY` | _(required)_ | Enrollment key |
-| `MESHNET_MANAGEMENT_URL` | `localhost:50051` | Management gRPC address |
-| `MESHNET_SIGNAL_URL` | `localhost:10000` | Signal gRPC address |
-| `MESHNET_WG_IFACE` | `meshnet0` | TUN interface name |
-| `MESHNET_STATE_DIR` | `/var/lib/meshnet` | Key + token persistence dir |
-| `MESHNET_STUN_URLS` | `stun:stun.l.google.com:19302` | STUN/TURN URLs (comma-separated) |
-| `MESHNET_DNS_UPSTREAM` | `8.8.8.8:53` | Upstream DNS resolver for non-mesh queries |
-| `MESHNET_TLS_SKIP_VERIFY` | `true` | When `true` (default), TOFU fingerprint pinning is used instead of full CA validation |
-| `MESHNET_TLS_CA_CERT` | _(empty)_ | Path to CA cert PEM — pins a specific CA, disables skip-verify |
+| `BLINEX_SETUP_KEY` | _(required)_ | Enrollment key |
+| `BLINEX_MANAGEMENT_URL` | `localhost:50051` | Management gRPC address |
+| `BLINEX_SIGNAL_URL` | `localhost:10000` | Signal gRPC address |
+| `BLINEX_WG_IFACE` | `blinex0` | TUN interface name |
+| `BLINEX_STATE_DIR` | `/var/lib/blinex` | Key + token persistence dir |
+| `BLINEX_STUN_URLS` | `stun:stun.l.google.com:19302` | STUN/TURN URLs (comma-separated) |
+| `BLINEX_DNS_UPSTREAM` | `8.8.8.8:53` | Upstream DNS resolver for non-mesh queries |
+| `BLINEX_TLS_SKIP_VERIFY` | `true` | When `true` (default), TOFU fingerprint pinning is used instead of full CA validation |
+| `BLINEX_TLS_CA_CERT` | _(empty)_ | Path to CA cert PEM — pins a specific CA, disables skip-verify |
 
 ### Relay
 
@@ -403,7 +403,7 @@ overlay/
 |---|---|---|
 | `RELAY_PUBLIC_IP` | _(required)_ | Public IP of the relay host |
 | `RELAY_UDP_PORT` | `3478` | STUN/TURN port |
-| `RELAY_AUTH_USER` | `meshnet` | TURN long-term credential user |
+| `RELAY_AUTH_USER` | `blinex` | TURN long-term credential user |
 | `RELAY_AUTH_PASS` | `change-me` | TURN password |
 
 ---
@@ -431,19 +431,19 @@ INFO TOFU: pinned server certificate — verify this fingerprint on first use se
 Set on both management and signal servers:
 
 ```bash
-TLS_CERT_FILE=/etc/meshnet/server.crt
-TLS_KEY_FILE=/etc/meshnet/server.key
+TLS_CERT_FILE=/etc/blinex/server.crt
+TLS_KEY_FILE=/etc/blinex/server.key
 ```
 
 Set on agents:
 
 ```bash
 # Option A — disable skip-verify (requires a CA trusted by the OS)
-MESHNET_TLS_SKIP_VERIFY=false
+BLINEX_TLS_SKIP_VERIFY=false
 
 # Option B — pin your own CA cert (recommended for self-hosted CA)
-MESHNET_TLS_SKIP_VERIFY=false
-MESHNET_TLS_CA_CERT=/etc/meshnet/ca.crt
+BLINEX_TLS_SKIP_VERIFY=false
+BLINEX_TLS_CA_CERT=/etc/blinex/ca.crt
 ```
 
 Certificates can be obtained from Let's Encrypt (via Certbot or Caddy) or an internal CA.
@@ -493,7 +493,7 @@ By default all enrolled devices can reach each other. Access rules let you restr
 1. Admin opens **Access Rules** in the dashboard → clicks **+ Add rule**
 2. Fills in source (IP, CIDR, or `*`), destination, protocol (`all`, `tcp`, `udp`, `icmp`), port (0 = any), action (`allow` / `deny`), and priority
 3. Management stores the rule and immediately pushes the full rule set to all connected agents via gRPC sync
-4. Each agent installs the rules into a dedicated `MESHNET-ACL` iptables chain (jumped from `INPUT` and `FORWARD`) — flush-and-reinstall on every update
+4. Each agent installs the rules into a dedicated `BLINEX-ACL` iptables chain (jumped from `INPUT` and `FORWARD`) — flush-and-reinstall on every update
 
 ### REST API
 
@@ -527,7 +527,7 @@ DELETE /api/v1/rules/:id      delete a rule
 
 Standard WireGuard uses a fixed UDP socket. STUN discovers the external address of that socket, but the port mapping often doesn't survive NAT — hole-punching fails.
 
-Meshnet solves this with **wireguard-go** (userspace) and a custom `IceBind` (`conn.Bind` interface):
+Bline-X solves this with **wireguard-go** (userspace) and a custom `IceBind` (`conn.Bind` interface):
 
 ```
 WireGuard device (wireguard-go)
@@ -550,7 +550,7 @@ The ICE-established connection *is* the WireGuard transport — no port mismatch
 
 The current version is stored in the [`VERSION`](VERSION) file. It is injected into every binary at build time and exposed at runtime via:
 
-- Startup log: `INFO meshnet management starting version=v0.4.0`
+- Startup log: `INFO blinex management starting version=v0.4.0`
 - Health endpoint: `GET /api/v1/health` → `{"status":"ok","version":"v0.4.0"}`
 
 To release a new version:
@@ -605,7 +605,7 @@ buf generate
 - [x] Exit node / subnet routing — dashboard toggle, WG AllowedIPs, OS routes, IP forwarding + masquerade (v0.2.0)
 - [x] Semantic versioning — `VERSION` file, ldflags injection, Docker image tags (v0.2.0)
 - [x] WireGuard mesh with ICE NAT traversal (STUN hole-punching + TURN relay fallback)
-- [x] CGNAT IP allocation (100.64.0.0/10) + Magic DNS (`hostname.mesh`)
+- [x] CGNAT IP allocation (100.64.0.0/10) + Magic DNS (`hostname.blinex`)
 - [x] Management server — gRPC + REST API, JWT auth, CORS
 - [x] PostgreSQL store (GORM) with in-memory fallback
 - [x] Setup keys — create, list, revoke via dashboard

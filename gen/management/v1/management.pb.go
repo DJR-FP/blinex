@@ -7,7 +7,7 @@
 package managementv1
 
 import (
-	v1 "github.com/meshnet/gen/common/v1"
+	v1 "github.com/blinex/gen/common/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -475,7 +475,7 @@ const file_management_v1_management_proto_rawDesc = "" +
 	"\fGetServerKey\x12\".management.v1.GetServerKeyRequest\x1a#.management.v1.GetServerKeyResponse\x12B\n" +
 	"\x05Login\x12\x1b.management.v1.LoginRequest\x1a\x1c.management.v1.LoginResponse\x12A\n" +
 	"\x04Sync\x12\x1a.management.v1.SyncRequest\x1a\x1b.management.v1.SyncResponse0\x01\x12]\n" +
-	"\x0eUpdatePeerMeta\x12$.management.v1.UpdatePeerMetaRequest\x1a%.management.v1.UpdatePeerMetaResponseB3Z1github.com/meshnet/gen/management/v1;managementv1b\x06proto3"
+	"\x0eUpdatePeerMeta\x12$.management.v1.UpdatePeerMetaRequest\x1a%.management.v1.UpdatePeerMetaResponseB3Z1github.com/blinex/gen/management/v1;managementv1b\x06proto3"
 
 var (
 	file_management_v1_management_proto_rawDescOnce sync.Once

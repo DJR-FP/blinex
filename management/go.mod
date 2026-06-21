@@ -1,4 +1,4 @@
-module github.com/meshnet/management
+module github.com/blinex/management
 
 go 1.25.0
 
@@ -7,7 +7,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
-	github.com/meshnet/gen v0.0.0
+	github.com/blinex/gen v0.0.0
 	github.com/rs/zerolog v1.33.0
 	google.golang.org/grpc v1.65.0
 	gorm.io/driver/postgres v1.6.0
@@ -55,4 +55,4 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 )
 
-replace github.com/meshnet/gen => ../gen
+replace github.com/blinex/gen => ../gen

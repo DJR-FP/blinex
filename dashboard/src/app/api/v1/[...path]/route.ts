@@ -9,7 +9,7 @@ const MGMT_URL = process.env.MGMT_API_URL ?? 'https://localhost:8080'
 
 async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse> {
   const cookieStore = cookies()
-  const token = cookieStore.get('meshnet_token')?.value
+  const token = cookieStore.get('blinex_token')?.value
   if (!token) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }

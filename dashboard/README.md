@@ -1,6 +1,6 @@
 # dashboard
 
-Web UI for Meshnet. Built with Next.js 14 (App Router), TypeScript, and Tailwind CSS.
+Web UI for Bline-X. Built with Next.js 14 (App Router), TypeScript, and Tailwind CSS.
 
 ## Pages
 

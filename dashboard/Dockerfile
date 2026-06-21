@@ -18,13 +18,13 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN addgroup -S meshnet && adduser -S meshnet -G meshnet
+RUN addgroup -S blinex && adduser -S blinex -G blinex
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-USER meshnet
+USER blinex
 
 EXPOSE 3000
 

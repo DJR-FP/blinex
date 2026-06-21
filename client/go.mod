@@ -1,9 +1,9 @@
-module github.com/meshnet/client
+module github.com/blinex/client
 
 go 1.25.0
 
 require (
-	github.com/meshnet/gen v0.0.0
+	github.com/blinex/gen v0.0.0
 	github.com/pion/ice/v2 v2.3.36
 	github.com/pion/stun v0.6.1
 	github.com/rs/zerolog v1.33.0
@@ -47,4 +47,4 @@ require (
 
 exclude google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f
 
-replace github.com/meshnet/gen => ../gen
+replace github.com/blinex/gen => ../gen

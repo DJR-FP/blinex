@@ -12,19 +12,19 @@ import (
 	"runtime"
 	"time"
 
-	commonv1 "github.com/meshnet/gen/common/v1"
-	managementv1 "github.com/meshnet/gen/management/v1"
-	signalv1 "github.com/meshnet/gen/signal/v1"
-	"github.com/meshnet/client/internal/acl"
-	"github.com/meshnet/client/internal/config"
-	"github.com/meshnet/client/internal/dns"
-	"github.com/meshnet/client/internal/ice"
-	"github.com/meshnet/client/internal/mgmclient"
-	"github.com/meshnet/client/internal/peer"
-	"github.com/meshnet/client/internal/routing"
-	"github.com/meshnet/client/internal/signalclient"
-	"github.com/meshnet/client/internal/state"
-	"github.com/meshnet/client/internal/wgmgr"
+	commonv1 "github.com/blinex/gen/common/v1"
+	managementv1 "github.com/blinex/gen/management/v1"
+	signalv1 "github.com/blinex/gen/signal/v1"
+	"github.com/blinex/client/internal/acl"
+	"github.com/blinex/client/internal/config"
+	"github.com/blinex/client/internal/dns"
+	"github.com/blinex/client/internal/ice"
+	"github.com/blinex/client/internal/mgmclient"
+	"github.com/blinex/client/internal/peer"
+	"github.com/blinex/client/internal/routing"
+	"github.com/blinex/client/internal/signalclient"
+	"github.com/blinex/client/internal/state"
+	"github.com/blinex/client/internal/wgmgr"
 	"github.com/rs/zerolog/log"
 )
 
@@ -81,7 +81,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	iceMgr := ice.New(wg.PublicKey(), cfg.STUNURLs, sig)
-	dnsResolver := dns.New("127.0.0.1:53535", "mesh", cfg.DNSUpstream)
+	dnsResolver := dns.New("127.0.0.1:53535", "blinex", cfg.DNSUpstream)
 
 	return &Engine{
 		cfg:           cfg,

@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: meshnet
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-meshnet-secret}"
-      POSTGRES_DB: meshnet
+      POSTGRES_USER: blinex
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-blinex-secret}"
+      POSTGRES_DB: blinex
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U meshnet"]
+      test: ["CMD-SHELL", "pg_isready -U blinex"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -26,9 +26,9 @@ services:
       MGMT_JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
       MGMT_ADMIN_PASSWORD: "${MGMT_ADMIN_PASSWORD:-}"
       MGMT_NETWORK_CIDR: "100.64.0.0/10"
-      MGMT_DNS_SUFFIX: "mesh"
-      MESHNET_DEFAULT_KEY: "${MESHNET_DEFAULT_KEY:-MESHNET-DEFAULT-KEY}"
-      DATABASE_URL: "host=postgres user=meshnet password=${POSTGRES_PASSWORD:-meshnet-secret} dbname=meshnet sslmode=disable"
+      MGMT_DNS_SUFFIX: "blinex"
+      BLINEX_DEFAULT_KEY: "${BLINEX_DEFAULT_KEY:-BLINEX-DEFAULT-KEY}"
+      DATABASE_URL: "host=postgres user=blinex password=${POSTGRES_PASSWORD:-blinex-secret} dbname=blinex sslmode=disable"
     ports:
       - "50051:50051"
       - "8080:8080"
@@ -56,8 +56,8 @@ services:
     environment:
       RELAY_PUBLIC_IP: "${RELAY_PUBLIC_IP:-127.0.0.1}"
       RELAY_UDP_PORT: "3478"
-      RELAY_REALM: "meshnet.io"
-      RELAY_AUTH_USER: "meshnet"
+      RELAY_REALM: "blinex.co.uk"
+      RELAY_AUTH_USER: "blinex"
       RELAY_AUTH_PASS: "${RELAY_AUTH_PASS:-change-me-in-production}"
     ports:
       - "3478:3478/udp"

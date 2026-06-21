@@ -24,11 +24,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM alpine:3.20
 RUN apk --no-cache add ca-certificates tzdata
 
-RUN addgroup -S meshnet && adduser -S meshnet -G meshnet
+RUN addgroup -S blinex && adduser -S blinex -G blinex
 
 COPY --from=builder /management /usr/local/bin/management
 
-USER meshnet
+USER blinex
 
 EXPOSE 50051 8080
 

@@ -63,7 +63,7 @@ func generateSelfSigned() (tls.Certificate, error) {
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{"Meshnet"},
+			Organization: []string{"Bline-X"},
 			CommonName:   hostname,
 		},
 		DNSNames:              []string{"localhost", hostname},

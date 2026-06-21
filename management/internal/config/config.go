@@ -31,7 +31,7 @@ func Load() *Config {
 		os.Exit(1)
 	}
 
-	defaultKey := os.Getenv("MESHNET_DEFAULT_KEY")
+	defaultKey := os.Getenv("BLINEX_DEFAULT_KEY")
 	if defaultKey == "" {
 		b := make([]byte, 16)
 		if _, err := rand.Read(b); err != nil {
@@ -40,7 +40,7 @@ func Load() *Config {
 		}
 		defaultKey = "msk-" + hex.EncodeToString(b)
 		fmt.Fprintf(os.Stderr, "\n  *** GENERATED SETUP KEY: %s ***\n", defaultKey)
-		fmt.Fprintln(os.Stderr, "  Set MESHNET_DEFAULT_KEY to use a fixed key across restarts.\n")
+		fmt.Fprintln(os.Stderr, "  Set BLINEX_DEFAULT_KEY to use a fixed key across restarts.\n")
 	}
 
 	return &Config{
@@ -49,7 +49,7 @@ func Load() *Config {
 		JWTSecret:   secret,
 		LogLevel:    getEnv("LOG_LEVEL", "info"),
 		NetworkCIDR: getEnv("MGMT_NETWORK_CIDR", "100.64.0.0/10"),
-		DNSSuffix:   getEnv("MGMT_DNS_SUFFIX", "mesh"),
+		DNSSuffix:   getEnv("MGMT_DNS_SUFFIX", "blinex"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		DefaultKey:  defaultKey,
 		TLSCertFile:   getEnv("TLS_CERT_FILE", ""),

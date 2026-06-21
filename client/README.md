@@ -1,4 +1,4 @@
-# client (meshnet-agent)
+# client (blinex-agent)
 
 The agent binary that runs on every enrolled device. It creates a WireGuard TUN interface, connects to peers via ICE NAT traversal, and serves a Magic DNS resolver.
 
@@ -6,11 +6,11 @@ The agent binary that runs on every enrolled device. It creates a WireGuard TUN 
 
 1. Loads or generates a stable WireGuard private key (persisted to `state.json`)
 2. Enrolls with the management server using a setup key → receives a CGNAT IP and JWT
-3. Configures the `meshnet0` TUN interface with the assigned IP
+3. Configures the `blinex0` TUN interface with the assigned IP
 4. Opens a streaming connection to the management server to receive live peer updates
 5. For each new peer, negotiates a direct P2P connection via ICE (STUN hole-punching, TURN relay fallback)
 6. Routes WireGuard traffic through the ICE-established connections
-7. Serves a Magic DNS resolver on `127.0.0.1:53535` (`hostname.mesh` → peer IP)
+7. Serves a Magic DNS resolver on `127.0.0.1:53535` (`hostname.blinex` → peer IP)
 
 ## Package layout
 
@@ -35,16 +35,16 @@ client/
 
 ## Configuration
 
-Config file: `/etc/meshnet/agent.json` (JSON). All fields can be overridden by env vars.
+Config file: `/etc/blinex/agent.json` (JSON). All fields can be overridden by env vars.
 
 | Field / Env var | Default | Description |
 |---|---|---|
-| `management_url` / `MESHNET_MANAGEMENT_URL` | `localhost:50051` | Management gRPC address |
-| `signal_url` / `MESHNET_SIGNAL_URL` | `localhost:10000` | Signal gRPC address |
-| `setup_key` / `MESHNET_SETUP_KEY` | _(required)_ | Enrollment key |
-| `wg_interface` / `MESHNET_WG_IFACE` | `meshnet0` | TUN interface name |
-| `state_dir` / `MESHNET_STATE_DIR` | `/var/lib/meshnet` | Directory for state.json |
-| `stun_urls` / `MESHNET_STUN_URLS` | `stun:stun.l.google.com:19302` | Comma-separated STUN/TURN URIs |
+| `management_url` / `BLINEX_MANAGEMENT_URL` | `localhost:50051` | Management gRPC address |
+| `signal_url` / `BLINEX_SIGNAL_URL` | `localhost:10000` | Signal gRPC address |
+| `setup_key` / `BLINEX_SETUP_KEY` | _(required)_ | Enrollment key |
+| `wg_interface` / `BLINEX_WG_IFACE` | `blinex0` | TUN interface name |
+| `state_dir` / `BLINEX_STATE_DIR` | `/var/lib/blinex` | Directory for state.json |
+| `stun_urls` / `BLINEX_STUN_URLS` | `stun:stun.l.google.com:19302` | Comma-separated STUN/TURN URIs |
 | `log_level` / `LOG_LEVEL` | `info` | debug / info / warn / error |
 
 ## ICE / NAT traversal design
@@ -82,5 +82,5 @@ The agent needs root (or `CAP_NET_ADMIN`) to create a TUN device.
 ```bash
 sudo ./bin/agent
 # or
-sudo -E MESHNET_SETUP_KEY=... ./bin/agent
+sudo -E BLINEX_SETUP_KEY=... ./bin/agent
 ```

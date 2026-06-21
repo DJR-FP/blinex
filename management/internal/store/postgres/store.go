@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/meshnet/management/internal/domain"
-	"github.com/meshnet/management/internal/store"
+	"github.com/blinex/management/internal/domain"
+	"github.com/blinex/management/internal/store"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

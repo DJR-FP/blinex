@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"github.com/meshnet/management/internal/domain"
+	"github.com/blinex/management/internal/domain"
 )
 
 // Store defines the persistence interface. Swap in-memory for PostgreSQL without

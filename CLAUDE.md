@@ -1,8 +1,8 @@
-# Meshnet — Claude Code Context
+# Bline-X — Claude Code Context
 
 ## What this is
 
-A WireGuard mesh VPN product (Tailscale/NetBird-like), built from scratch in Go + Next.js. Open-core, targeting SMB/developer teams.
+A WireGuard mesh VPN product (Tailscale/NetBird-like), built from scratch in Go + Next.js. Open-core, targeting SMB/developer teams. Branded as Bline-X.
 
 ## Repo layout
 
@@ -46,7 +46,7 @@ docker push ghcr.io/djr-fp/overlay/relay:latest
 docker push ghcr.io/djr-fp/overlay/dashboard:latest
 ```
 
-Each Dockerfile creates a minimal workspace (gen + the target module only) to avoid the full go.work file. All images use golang:1.25-alpine builder → alpine:3.20 runtime, run as non-root `meshnet` user.
+Each Dockerfile creates a minimal workspace (gen + the target module only) to avoid the full go.work file. All images use golang:1.25-alpine builder → alpine:3.20 runtime, run as non-root `blinex` user.
 
 ## Build commands
 
@@ -120,13 +120,13 @@ Adding new persistence operations: update the interface, then implement in both 
 
 ## DNS
 
-The agent runs a UDP DNS server on `127.0.0.1:53535`. Queries for `*.mesh` domains resolve to peer IPs. All other queries are forwarded to `8.8.8.8:53`.
+The agent runs a UDP DNS server on `127.0.0.1:53535`. Queries for `*.blinex` domains resolve to peer IPs. All other queries are forwarded to `8.8.8.8:53`.
 
 To use Magic DNS, configure the device's DNS to `127.0.0.1:53535` or port-forward from :53.
 
 ## Default setup key
 
-`MESHNET-DEFAULT-KEY` is seeded at startup (both memory and postgres stores). It's valid for 1 year. Create real keys via the Setup Keys page before going to production.
+`BLINEX-DEFAULT-KEY` is seeded at startup (both memory and postgres stores). It's valid for 1 year. Create real keys via the Setup Keys page before going to production.
 
 ## Common pitfalls
 
@@ -149,7 +149,7 @@ go run ./signal/cmd/server
 RELAY_PUBLIC_IP=127.0.0.1 go run ./relay/cmd/server
 
 # Terminal 4 (needs root — creates TUN device)
-sudo MESHNET_SETUP_KEY=MESHNET-DEFAULT-KEY go run ./client/cmd/agent
+sudo BLINEX_SETUP_KEY=BLINEX-DEFAULT-KEY go run ./client/cmd/agent
 
 # Terminal 5
 cd dashboard && npm run dev

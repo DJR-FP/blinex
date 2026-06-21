@@ -8,10 +8,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 
-	signalv1 "github.com/meshnet/gen/signal/v1"
-	signalauth "github.com/meshnet/signal/internal/auth"
-	"github.com/meshnet/signal/internal/server"
-	"github.com/meshnet/signal/internal/tlsconfig"
+	signalv1 "github.com/blinex/gen/signal/v1"
+	signalauth "github.com/blinex/signal/internal/auth"
+	"github.com/blinex/signal/internal/server"
+	"github.com/blinex/signal/internal/tlsconfig"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -20,7 +20,7 @@ var version = "dev"
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	log.Info().Str("version", version).Msg("meshnet signal starting")
+	log.Info().Str("version", version).Msg("blinex signal starting")
 
 	addr := getEnv("SIGNAL_ADDR", ":10000")
 
