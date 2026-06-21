@@ -12,7 +12,7 @@ MESHNET_WG_IFACE="${MESHNET_WG_IFACE:-meshnet0}"
 MESHNET_STATE_DIR="${MESHNET_STATE_DIR:-/var/lib/meshnet}"
 MESHNET_INSTALL_DIR="${MESHNET_INSTALL_DIR:-/usr/local/bin}"
 MESHNET_SERVICE_DIR="${MESHNET_SERVICE_DIR:-/etc/systemd/system}"
-GITHUB_REPO="meshnet-io/meshnet"
+GITHUB_REPO="DJR-FP/overlay"
 VERSION="${MESHNET_VERSION:-latest}"
 
 RED='\033[0;31m'
@@ -54,7 +54,12 @@ if ! command -v wg &>/dev/null; then
 fi
 
 # Download binary
-BINARY_URL="https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/meshnet-agent-${OS}-${ARCH}"
+if [ "$VERSION" = "latest" ]; then
+  VERSION=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  [[ -z "$VERSION" ]] && error "Could not determine latest version"
+fi
+info "Version: ${VERSION}"
+BINARY_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/meshnet-agent-${OS}-${ARCH}"
 info "Downloading agent from ${BINARY_URL}…"
 curl -fsSL -o /tmp/meshnet-agent "${BINARY_URL}" || {
   warn "GitHub release not found. Building from source is required for now."
