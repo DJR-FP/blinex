@@ -16,6 +16,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 - **TLS encrypted control plane** — management and signal servers are TLS by default; self-signed cert generated automatically if none is provided
 - **Exit node / subnet routing** — advertise a LAN subnet or full exit node through any mesh device; toggle per device in the dashboard
 - **Access control rules** — source/destination/protocol/port policy editor; rules pushed to agents and enforced with iptables
+- **Admin login** — username/password dashboard access independent of any enrolled device; set `MGMT_ADMIN_PASSWORD` to enable
 - **Simple onboarding** — one `curl | bash` to enroll a device; JWT token appears in the dashboard
 - **Web dashboard** — manage devices, routes, access rules, and setup keys from a browser
 - **Self-hosted** — `docker compose up` and you own your data; no phone-home
@@ -299,6 +300,41 @@ cd dashboard && npm install && npm run dev   # http://localhost:3000
 
 ---
 
+## Admin Login
+
+The dashboard supports two login methods:
+
+| Method | Tab | When to use |
+|---|---|---|
+| **Admin login** | "Admin login" (default) | Manage the network without needing an enrolled device |
+| **Device token** | "Device token" | Paste the JWT printed by an enrolling agent |
+
+### Enabling admin login
+
+Set `MGMT_ADMIN_PASSWORD` in your `.env` before starting the stack:
+
+```bash
+MGMT_ADMIN_USER=admin           # optional, defaults to "admin"
+MGMT_ADMIN_PASSWORD=your-password
+```
+
+Then open the dashboard — the **Admin login** tab will accept those credentials. A 24-hour JWT is issued and stored as an HttpOnly cookie.
+
+> If `MGMT_ADMIN_PASSWORD` is not set, the Admin login tab is present but will return an error — set the env var to activate it.
+
+### REST API
+
+```
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{"username": "admin", "password": "your-password"}
+```
+
+Returns `{"token": "<jwt>"}` on success. Use the token as a Bearer token for subsequent API calls.
+
+---
+
 ## Project Structure
 
 ```
@@ -334,6 +370,8 @@ overlay/
 | `TLS_CERT_FILE` | _(empty = self-signed)_ | Path to TLS certificate PEM |
 | `TLS_KEY_FILE` | _(empty = self-signed)_ | Path to TLS private key PEM |
 | `GRPC_REFLECTION` | `false` | Set `true` to enable gRPC reflection (dev only) |
+| `MGMT_ADMIN_USER` | `admin` | Dashboard admin username |
+| `MGMT_ADMIN_PASSWORD` | _(empty = disabled)_ | Dashboard admin password — set this to enable admin login |
 
 ### Signal Server
 
@@ -559,6 +597,7 @@ buf generate
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
+- [x] **Admin login** — username/password dashboard access via `MGMT_ADMIN_PASSWORD`; independent of agent enrollment (v0.5.1)
 - [x] **Security hardening** — HttpOnly cookie auth, TOFU cert pinning, gRPC rate limiting, JWT revocation on delete, signal server JWT auth, configurable CORS/DNS, 24h token expiry (v0.5.0)
 - [x] **Exit node OS routing** — split-tunnel /1 routes + host-route pinning for management/signal; no manual policy routing needed (v0.4.0)
 - [x] **Access control rules** — source/destination/protocol/port policy editor, iptables enforcement on agents (v0.3.0)
