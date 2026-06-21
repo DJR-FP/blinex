@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -19,14 +20,16 @@ import (
 )
 
 type Server struct {
-	store   store.Store
-	auth    *auth.Manager
-	router  *gin.Engine
-	notify  func(accountID string) // triggers gRPC sync push to all account peers
-	version string
+	store         store.Store
+	auth          *auth.Manager
+	router        *gin.Engine
+	notify        func(accountID string) // triggers gRPC sync push to all account peers
+	version       string
+	adminUser     string
+	adminPassword string
 }
 
-func New(st store.Store, authMgr *auth.Manager, notify func(string), version string) *Server {
+func New(st store.Store, authMgr *auth.Manager, notify func(string), version, adminUser, adminPassword string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -41,7 +44,7 @@ func New(st store.Store, authMgr *auth.Manager, notify func(string), version str
 		MaxAge:           12 * time.Hour,
 	}))
 
-	s := &Server{store: st, auth: authMgr, router: r, notify: notify, version: version}
+	s := &Server{store: st, auth: authMgr, router: r, notify: notify, version: version, adminUser: adminUser, adminPassword: adminPassword}
 	s.registerRoutes()
 	return s
 }
@@ -66,6 +69,7 @@ func (s *Server) registerRoutes() {
 	api := s.router.Group("/api/v1")
 
 	api.GET("/health", s.health)
+	api.POST("/auth/login", s.adminLogin)
 
 	auth := api.Group("/", s.authMiddleware())
 
@@ -404,6 +408,34 @@ func (s *Server) deleteRule(c *gin.Context) {
 		s.notify(claims.AccountID)
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) adminLogin(c *gin.Context) {
+	if s.adminPassword == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin login is not enabled"})
+		return
+	}
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	userMatch := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.adminUser)) == 1
+	passMatch := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.adminPassword)) == 1
+	if !userMatch || !passMatch {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+	token, err := s.auth.IssueAdminToken("default")
+	if err != nil {
+		log.Error().Err(err).Msg("adminLogin: issue token")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 
 func (s *Server) authMiddleware() gin.HandlerFunc {

@@ -11,6 +11,18 @@ export async function login(token: string): Promise<void> {
   }
 }
 
+export async function adminLogin(username: string, password: string): Promise<void> {
+  const res = await fetch('/api/auth/admin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as { error?: string }).error ?? 'Login failed')
+  }
+}
+
 // Clear the HttpOnly cookie via the API route.
 export async function logout(): Promise<void> {
   await fetch('/api/auth', { method: 'DELETE' })

@@ -12,6 +12,7 @@ type Claims struct {
 	PeerID    string `json:"peer_id"`
 	WGPubKey  string `json:"wg_pub_key"`
 	AccountID string `json:"account_id"`
+	Role      string `json:"role"` // "peer" or "admin"
 	jwt.RegisteredClaims
 }
 
@@ -26,6 +27,19 @@ func NewManager(secret string) *Manager {
 		secret:  []byte(secret),
 		revoked: make(map[string]time.Time),
 	}
+}
+
+func (m *Manager) IssueAdminToken(accountID string) (string, error) {
+	claims := Claims{
+		AccountID: accountID,
+		Role:      "admin",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(m.secret)
 }
 
 func (m *Manager) IssueToken(peerID, wgPubKey, accountID string) (string, error) {

@@ -9,16 +9,18 @@ import (
 )
 
 type Config struct {
-	GRPCAddr    string
-	HTTPAddr    string
-	JWTSecret   string
-	LogLevel    string
-	NetworkCIDR string
-	DNSSuffix   string
-	DatabaseURL string // postgres DSN; empty = in-memory store
-	DefaultKey  string // seed setup key value
-	TLSCertFile string // path to TLS certificate PEM; empty = self-signed
-	TLSKeyFile  string // path to TLS private key PEM; empty = self-signed
+	GRPCAddr      string
+	HTTPAddr      string
+	JWTSecret     string
+	LogLevel      string
+	NetworkCIDR   string
+	DNSSuffix     string
+	DatabaseURL   string // postgres DSN; empty = in-memory store
+	DefaultKey    string // seed setup key value
+	TLSCertFile   string // path to TLS certificate PEM; empty = self-signed
+	TLSKeyFile    string // path to TLS private key PEM; empty = self-signed
+	AdminUser     string // dashboard admin username; default "admin"
+	AdminPassword string // dashboard admin password; empty = admin login disabled
 }
 
 func Load() *Config {
@@ -50,8 +52,10 @@ func Load() *Config {
 		DNSSuffix:   getEnv("MGMT_DNS_SUFFIX", "mesh"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		DefaultKey:  defaultKey,
-		TLSCertFile: getEnv("TLS_CERT_FILE", ""),
-		TLSKeyFile:  getEnv("TLS_KEY_FILE", ""),
+		TLSCertFile:   getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:    getEnv("TLS_KEY_FILE", ""),
+		AdminUser:     getEnv("MGMT_ADMIN_USER", "admin"),
+		AdminPassword: getEnv("MGMT_ADMIN_PASSWORD", ""),
 	}
 }
 
