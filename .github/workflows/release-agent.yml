@@ -45,13 +45,43 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: install.sh
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Create release
+      - name: Create release on this repo
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: artifacts/meshnet-agent-*
+
+      - name: Publish to public meshagent repo
+        env:
+          GH_TOKEN: ${{ secrets.MESHAGENT_PAT }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          # Clone public repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/DJR-FP/meshagent.git meshagent
+
+          # Copy install script
+          cp install.sh meshagent/install.sh
+          cd meshagent
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add install.sh
+          git diff --cached --quiet || git commit -m "update install.sh from overlay ${TAG}"
+          git push origin main
+
+          # Create release with binaries
+          gh release create "${TAG}" \
+            --repo DJR-FP/meshagent \
+            --title "Meshnet Agent ${TAG}" \
+            --generate-notes \
+            ../artifacts/meshnet-agent-*

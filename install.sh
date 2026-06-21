@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Meshnet Agent Installer
-# Usage: curl -fsSL https://install.meshnet.io/agent | MESHNET_SETUP_KEY=<key> bash
-# Or:    MESHNET_SETUP_KEY=<key> MESHNET_MANAGEMENT_URL=<host:50051> ./install.sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/DJR-FP/meshagent/main/install.sh | sudo MESHNET_SETUP_KEY=<key> bash
+# Or:    sudo MESHNET_SETUP_KEY=<key> MESHNET_MANAGEMENT_URL=<host:50051> ./install.sh
 
 MESHNET_SETUP_KEY="${MESHNET_SETUP_KEY:-}"
 MESHNET_MANAGEMENT_URL="${MESHNET_MANAGEMENT_URL:-localhost:50051}"
@@ -12,7 +12,7 @@ MESHNET_WG_IFACE="${MESHNET_WG_IFACE:-meshnet0}"
 MESHNET_STATE_DIR="${MESHNET_STATE_DIR:-/var/lib/meshnet}"
 MESHNET_INSTALL_DIR="${MESHNET_INSTALL_DIR:-/usr/local/bin}"
 MESHNET_SERVICE_DIR="${MESHNET_SERVICE_DIR:-/etc/systemd/system}"
-GITHUB_REPO="DJR-FP/overlay"
+GITHUB_REPO="DJR-FP/meshagent"
 VERSION="${MESHNET_VERSION:-latest}"
 
 RED='\033[0;31m'
