@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 
 	"github.com/rs/zerolog/log"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
+	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -19,19 +21,35 @@ const defaultMTU = 1420
 // Manager manages a userspace WireGuard device whose UDP transport is provided
 // by per-peer ICE connections (via IceBind).
 type Manager struct {
-	ifaceName string
-	dev       *device.Device
-	tunDev    tun.Device
-	bind      *IceBind
-	privKey   wgtypes.Key
-	pubKeyB64 string
+	ifaceName    string
+	dev          *device.Device
+	tunDev       tun.Device
+	bind         *IceBind
+	privKey      wgtypes.Key
+	pubKeyB64    string
+	netstackMode bool
+	tnet         *netstack.Net // non-nil in netstack mode after SetAddress
 }
 
 // New creates (or recreates) the named WireGuard interface using wireguard-go.
 // privKey is the persistent Curve25519 private key loaded from state.
+// If /dev/net/tun is unavailable (e.g. in unprivileged LXC), defers TUN
+// creation to SetAddress and uses a userspace netstack.
 func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
-	// Create kernel TUN device.
-	tunDev, err := tun.CreateTUN(ifaceName, defaultMTU)
+	pubKeyArr := privKey.PublicKey()
+	pubKeyB64 := base64.StdEncoding.EncodeToString(pubKeyArr[:])
+
+	tunDev, err := createTUN(ifaceName)
+	if err != nil && isTUNUnavailable(err) {
+		log.Warn().Msg("TUN device unavailable — using userspace netstack mode (no kernel interface)")
+		return &Manager{
+			ifaceName:    ifaceName,
+			bind:         NewIceBind(),
+			privKey:      privKey,
+			pubKeyB64:    pubKeyB64,
+			netstackMode: true,
+		}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("creating TUN %q: %w", ifaceName, err)
 	}
@@ -52,8 +70,6 @@ func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 		return nil, fmt.Errorf("bringing up WireGuard device: %w", err)
 	}
 
-	pubKeyArr := privKey.PublicKey()
-	pubKeyB64 := base64.StdEncoding.EncodeToString(pubKeyArr[:])
 	log.Info().Str("iface", ifaceName).Str("pubkey", pubKeyB64[:16]+"…").Msg("WireGuard device ready")
 
 	return &Manager{
@@ -72,8 +88,20 @@ func (m *Manager) PublicKey() string { return m.pubKeyB64 }
 // Bind returns the IceBind so the ICE manager can register peer connections.
 func (m *Manager) Bind() *IceBind { return m.bind }
 
+// NetstackMode returns true when the manager is operating in userspace
+// netstack mode (no kernel TUN device).
+func (m *Manager) NetstackMode() bool { return m.netstackMode }
+
+// NetstackNet returns the netstack Net for dialing through the tunnel.
+// Only valid in netstack mode after SetAddress has been called.
+func (m *Manager) NetstackNet() *netstack.Net { return m.tnet }
+
 // SetAddress assigns a CIDR address to the TUN interface.
+// In netstack mode, this creates the userspace TUN and WireGuard device.
 func (m *Manager) SetAddress(cidr string) error {
+	if m.netstackMode {
+		return m.initNetstack(cidr)
+	}
 	link, err := netlink.LinkByName(m.ifaceName)
 	if err != nil {
 		return fmt.Errorf("link %q not found: %w", m.ifaceName, err)
@@ -86,6 +114,40 @@ func (m *Manager) SetAddress(cidr string) error {
 		return fmt.Errorf("setting address: %w", err)
 	}
 	return netlink.LinkSetUp(link)
+}
+
+// initNetstack creates the netstack TUN and WireGuard device now that we
+// know the local address.
+func (m *Manager) initNetstack(cidr string) error {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return fmt.Errorf("parsing address %q: %w", cidr, err)
+	}
+
+	tunDev, tnet, err := createNetstackTUN(prefix.Addr())
+	if err != nil {
+		return err
+	}
+
+	logger := device.NewLogger(device.LogLevelError, "[wg] ")
+	dev := device.NewDevice(tunDev, m.bind, logger)
+
+	privHex := hex.EncodeToString(m.privKey[:])
+	if err := dev.IpcSet(fmt.Sprintf("private_key=%s\nlisten_port=0\n", privHex)); err != nil {
+		tunDev.Close()
+		return fmt.Errorf("configuring WireGuard key: %w", err)
+	}
+
+	if err := dev.Up(); err != nil {
+		tunDev.Close()
+		return fmt.Errorf("bringing up WireGuard device: %w", err)
+	}
+
+	m.dev = dev
+	m.tunDev = tunDev
+	m.tnet = tnet
+	log.Info().Str("addr", cidr).Msg("WireGuard netstack device ready")
+	return nil
 }
 
 // UpsertPeer adds or updates a WireGuard peer.
@@ -137,11 +199,15 @@ func (m *Manager) RemovePeer(pubKeyB64 string) error {
 
 // Close shuts down the WireGuard device and the TUN interface.
 func (m *Manager) Close() error {
-	m.dev.Close()
+	if m.dev != nil {
+		m.dev.Close()
+	}
 	m.bind.Close()
-	link, err := netlink.LinkByName(m.ifaceName)
-	if err == nil {
-		_ = netlink.LinkDel(link)
+	if !m.netstackMode {
+		link, err := netlink.LinkByName(m.ifaceName)
+		if err == nil {
+			_ = netlink.LinkDel(link)
+		}
 	}
 	return nil
 }

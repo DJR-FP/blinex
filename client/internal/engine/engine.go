@@ -44,6 +44,7 @@ type Engine struct {
 	ice           *ice.Manager
 	dns           *dns.Resolver
 	peers         *peer.Manager
+	forwarder     *wgmgr.Forwarder
 	appliedRoutes map[string][]string // peerKey → route CIDRs currently installed in OS
 	exitNode      *exitNodeState      // non-nil when exit node routing is active
 	ctx           context.Context
@@ -125,9 +126,23 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("setting WireGuard address: %w", err)
 	}
 
+	// In netstack mode, start the transparent forwarder so local processes
+	// can reach mesh peers via iptables REDIRECT.
+	if e.wg.NetstackMode() {
+		meshCIDR := guessMeshCIDR(loginResp.NetworkConfig.Address)
+		fwd := wgmgr.NewForwarder(e.wg.NetstackNet(), meshCIDR)
+		if err := fwd.Start(ctx); err != nil {
+			log.Warn().Err(err).Msg("netstack forwarder failed to start — mesh may not be reachable from local processes")
+		} else {
+			e.forwarder = fwd
+			defer fwd.Stop()
+		}
+	}
+
 	log.Info().
 		Str("ip", loginResp.NetworkConfig.Address).
 		Str("peer_id", loginResp.PeerId).
+		Bool("netstack", e.wg.NetstackMode()).
 		Msg("enrolled")
 
 	// Magic DNS.
@@ -198,29 +213,32 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		}
 	}
 
-	// If we are the gateway for any route, set up IP forwarding + masquerade.
-	if selfRoutes := routesByGateway[selfKey]; len(selfRoutes) > 0 {
-		if err := routing.EnableForwarding(); err != nil {
-			log.Warn().Err(err).Msg("failed to enable IP forwarding")
+	// OS-level routing and exit node support require a kernel TUN interface.
+	if !e.wg.NetstackMode() {
+		// If we are the gateway for any route, set up IP forwarding + masquerade.
+		if selfRoutes := routesByGateway[selfKey]; len(selfRoutes) > 0 {
+			if err := routing.EnableForwarding(); err != nil {
+				log.Warn().Err(err).Msg("failed to enable IP forwarding")
+			}
+			if err := routing.AddMasquerade(); err != nil {
+				log.Warn().Err(err).Msg("failed to add iptables masquerade")
+			}
+			log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
 		}
-		if err := routing.AddMasquerade(); err != nil {
-			log.Warn().Err(err).Msg("failed to add iptables masquerade")
-		}
-		log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
-	}
 
-	// Detect whether a peer (not ourselves) is advertising a default route.
-	hasExitNode := false
-	for _, r := range resp.Routes {
-		if r.Enabled && isDefaultRoute(r.Network) && r.Gateway != selfKey {
-			hasExitNode = true
-			break
+		// Detect whether a peer (not ourselves) is advertising a default route.
+		hasExitNode := false
+		for _, r := range resp.Routes {
+			if r.Enabled && isDefaultRoute(r.Network) && r.Gateway != selfKey {
+				hasExitNode = true
+				break
+			}
 		}
-	}
-	if hasExitNode && e.exitNode == nil {
-		e.activateExitNode()
-	} else if !hasExitNode && e.exitNode != nil {
-		e.deactivateExitNode()
+		if hasExitNode && e.exitNode == nil {
+			e.activateExitNode()
+		} else if !hasExitNode && e.exitNode != nil {
+			e.deactivateExitNode()
+		}
 	}
 
 	added, updated, removed := e.peers.Diff(resp.Peers)
@@ -233,7 +251,9 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		if err := e.wg.UpsertPeer(p.WgPubKey, p.AllowedIps, ""); err != nil {
 			log.Warn().Err(err).Str("peer", p.Id).Msg("add peer failed")
 		}
-		e.applyOSRoutes(p.WgPubKey, nil, routesByGateway[p.WgPubKey])
+		if !e.wg.NetstackMode() {
+			e.applyOSRoutes(p.WgPubKey, nil, routesByGateway[p.WgPubKey])
+		}
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 		e.ice.StartConnect(e.ctx, p.WgPubKey)
 		log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).
@@ -247,7 +267,9 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		if err := e.wg.UpsertPeer(p.WgPubKey, p.AllowedIps, ""); err != nil {
 			log.Warn().Err(err).Str("peer", p.Id).Msg("update peer failed")
 		}
-		e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], routesByGateway[p.WgPubKey])
+		if !e.wg.NetstackMode() {
+			e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], routesByGateway[p.WgPubKey])
+		}
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 	}
 
@@ -258,15 +280,17 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		if err := e.wg.RemovePeer(p.WgPubKey); err != nil {
 			log.Warn().Err(err).Str("peer", p.Id).Msg("remove peer failed")
 		}
-		e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], nil)
+		if !e.wg.NetstackMode() {
+			e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], nil)
+		}
 		delete(e.appliedRoutes, p.WgPubKey)
 		e.dns.Remove(p.DnsLabel)
 		e.ice.ClosePeer(p.WgPubKey)
 		log.Info().Str("peer", p.Hostname).Msg("peer removed")
 	}
 
-	// Apply ACL rules.
-	if len(resp.Rules) > 0 {
+	// Apply ACL rules (iptables-based, only in kernel TUN mode).
+	if !e.wg.NetstackMode() && len(resp.Rules) > 0 {
 		if err := acl.EnsureChain(e.cfg.WGInterface); err != nil {
 			log.Warn().Err(err).Msg("ACL chain setup failed")
 		} else if err := acl.ApplyRules(resp.Rules, e.cfg.WGInterface); err != nil {
@@ -426,6 +450,27 @@ func shortKey(k string) string {
 		return k[:8]
 	}
 	return k
+}
+
+// guessMeshCIDR derives a broad CIDR for the mesh from the assigned address.
+// e.g. "100.64.0.5/32" → "100.64.0.0/10"
+func guessMeshCIDR(addr string) string {
+	ip, _, err := net.ParseCIDR(addr)
+	if err != nil {
+		ip = net.ParseIP(addr)
+	}
+	if ip == nil {
+		return "100.64.0.0/10"
+	}
+	// Use a /10 covering the CGNAT range (100.64.0.0/10) which is standard for mesh VPNs.
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 100 {
+		return "100.64.0.0/10"
+	}
+	// Fallback: /16 of whatever we got.
+	if ip4 := ip.To4(); ip4 != nil {
+		return fmt.Sprintf("%d.%d.0.0/16", ip4[0], ip4[1])
+	}
+	return "100.64.0.0/10"
 }
 
 // buildTLSConfigs returns per-server TLS configs.
