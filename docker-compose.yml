@@ -69,6 +69,8 @@ services:
       args:
         NEXT_PUBLIC_MGMT_API: "${NEXT_PUBLIC_MGMT_API:-http://localhost:8080}"
     restart: unless-stopped
+    environment:
+      MGMT_API_URL: "${MGMT_API_URL:-https://management:8080}"
     ports:
       - "3000:3000"
     depends_on:
