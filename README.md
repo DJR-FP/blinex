@@ -652,6 +652,22 @@ cp .env.example .env
 docker compose up -d
 ```
 
+### Stale peer won't delete from dashboard
+
+Delete it directly from the database:
+
+```bash
+# List peers
+docker compose exec postgres psql -U blinex -d blinex -c "SELECT id, hostname, wg_pub_key FROM peers;"
+
+# Delete a specific peer
+docker compose exec postgres psql -U blinex -d blinex -c "DELETE FROM peers WHERE wg_pub_key = 'THE_KEY';"
+
+# Or clear all peers and start fresh
+docker compose exec postgres psql -U blinex -d blinex -c "DELETE FROM peers;"
+docker compose restart management
+```
+
 ### Agent crashes with protobuf panic (exit code 2)
 
 Version mismatch between agent and server. Make sure both are running the same version. Rebuild the server images (`docker compose build && docker compose up -d`) and reinstall the agent.

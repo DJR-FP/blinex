@@ -190,6 +190,26 @@ peer(zIVl…np3g) - Failed to send handshake initiation: no known endpoint for p
 3. The STUN/TURN relay is reachable: `nc -zuv your-server 3478`
 4. Firewalls allow UDP traffic between peers for hole-punching
 
+### Stale peer won't delete from dashboard
+
+A peer may get stuck in the database and can't be removed from the UI.
+
+**Fix:** Delete it directly from PostgreSQL:
+
+```bash
+# List all peers
+docker compose exec postgres psql -U blinex -d blinex -c "SELECT id, hostname, wg_pub_key FROM peers;"
+
+# Delete a specific peer
+docker compose exec postgres psql -U blinex -d blinex -c "DELETE FROM peers WHERE wg_pub_key = 'THE_KEY_HERE';"
+
+# Or clear all peers
+docker compose exec postgres psql -U blinex -d blinex -c "DELETE FROM peers;"
+
+# Restart management to push updated peer list
+docker compose restart management
+```
+
 ### TUN device unavailable — using netstack mode
 
 ```
