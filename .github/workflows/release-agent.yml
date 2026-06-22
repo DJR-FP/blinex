@@ -32,7 +32,7 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Build agent
+      - name: Build agent and uninstaller
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -44,12 +44,17 @@ jobs:
           go build -ldflags "-s -w -X main.version=${VERSION}" \
             -o "blinex-agent-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" \
             ./client/cmd/agent
+          go build -ldflags "-s -w" \
+            -o "blinex-uninstall-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" \
+            ./client/cmd/uninstall
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: blinex-agent-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: blinex-agent-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: blinex-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            blinex-agent-${{ matrix.goos }}-${{ matrix.goarch }}*
+            blinex-uninstall-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   release:
     needs: build
@@ -60,7 +65,6 @@ jobs:
           sparse-checkout: |
             install.sh
             uninstall.sh
-            uninstall.ps1
           sparse-checkout-cone-mode: false
 
       - uses: actions/download-artifact@v4
@@ -72,7 +76,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/blinex-agent-*
+          files: |
+            artifacts/blinex-agent-*
+            artifacts/blinex-uninstall-*
 
       - name: Publish to public blinex-agent repo
         env:
@@ -84,12 +90,12 @@ jobs:
           git clone https://x-access-token:${GH_TOKEN}@github.com/DJR-FP/blinex-agent.git blinex-agent
 
           # Copy install and uninstall scripts
-          cp install.sh uninstall.sh uninstall.ps1 blinex-agent/
+          cp install.sh uninstall.sh blinex-agent/
           cd blinex-agent
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add install.sh uninstall.sh uninstall.ps1
-          git diff --cached --quiet || git commit -m "update install.sh from overlay ${TAG}"
+          git add install.sh uninstall.sh
+          git diff --cached --quiet || git commit -m "update scripts from blinex ${TAG}"
           git push origin main
 
           # Delete existing release if re-tagging
@@ -100,4 +106,5 @@ jobs:
             --repo DJR-FP/blinex-agent \
             --title "Bline-X Agent ${TAG}" \
             --generate-notes \
-            ../artifacts/blinex-agent-*
+            ../artifacts/blinex-agent-* \
+            ../artifacts/blinex-uninstall-*
