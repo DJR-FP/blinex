@@ -273,13 +273,33 @@ docker compose up -d
 ### Enroll a device
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DJR-FP/overlay/main/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/install.sh | \
   BLINEX_SETUP_KEY=BLINEX-DEFAULT-KEY \
   BLINEX_MANAGEMENT_URL=your-server:50051 \
   bash
 ```
 
 The agent prints a JWT on first enrollment — paste it into the dashboard to sign in.
+
+### Uninstall a device
+
+Pre-built uninstall binaries are included in each [release](https://github.com/DJR-FP/blinex-agent/releases).
+
+**Linux / macOS:**
+
+```bash
+# Download and run the uninstaller
+curl -fsSL https://github.com/DJR-FP/blinex-agent/releases/latest/download/blinex-uninstall-linux-amd64 -o blinex-uninstall
+chmod +x blinex-uninstall
+sudo ./blinex-uninstall
+
+# Or use the shell script
+curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/uninstall.sh | sudo bash
+```
+
+**Windows:** Download `blinex-uninstall-windows-amd64.exe` from the [latest release](https://github.com/DJR-FP/blinex-agent/releases) and run as Administrator.
+
+The uninstaller removes the service, binary, config, state, firewall rules, and network interface. The device stays listed in the dashboard until you delete it there.
 
 ### Development (no Docker)
 
