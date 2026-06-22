@@ -70,6 +70,12 @@ func (s *Server) Send(stream signalv1.SignalService_SendServer) error {
 
 		if err := target.Send(msg); err != nil {
 			log.Warn().Err(err).Str("remote", msg.RemoteKey[:min(8, len(msg.RemoteKey))]).Msg("failed to forward signal message")
+		} else {
+			log.Debug().
+				Str("from", msg.Key[:min(8, len(msg.Key))]).
+				Str("to", msg.RemoteKey[:min(8, len(msg.RemoteKey))]).
+				Str("type", msg.Body.GetType().String()).
+				Msg("signal message relayed")
 		}
 	}
 }
