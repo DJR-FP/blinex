@@ -84,3 +84,37 @@ sudo ./bin/agent
 # or
 sudo -E BLINEX_SETUP_KEY=... ./bin/agent
 ```
+
+## Uninstalling
+
+Pre-built uninstall binaries are included in each [release](https://github.com/DJR-FP/blinex-agent/releases). The uninstaller removes the agent binary, service, config, state, and platform-specific resources.
+
+### Linux
+
+```bash
+# Using the uninstall binary from the release
+curl -fsSL https://github.com/DJR-FP/blinex-agent/releases/latest/download/blinex-uninstall-linux-amd64 -o blinex-uninstall
+chmod +x blinex-uninstall
+sudo ./blinex-uninstall
+
+# Or using the shell script
+curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/uninstall.sh | sudo bash
+```
+
+Removes: systemd service, `/usr/local/bin/blinex-agent`, `/etc/blinex/`, `/var/lib/blinex/`, `BLINEX-ACL` iptables chain, and the `blinex0` interface.
+
+### macOS
+
+```bash
+curl -fsSL https://github.com/DJR-FP/blinex-agent/releases/latest/download/blinex-uninstall-darwin-arm64 -o blinex-uninstall
+chmod +x blinex-uninstall
+sudo ./blinex-uninstall
+```
+
+Removes: `io.blinex.agent` launchd service, binary, config, state, and log file.
+
+### Windows
+
+Download `blinex-uninstall-windows-amd64.exe` from the [latest release](https://github.com/DJR-FP/blinex-agent/releases) and run it as Administrator.
+
+Removes: `BlinexAgent` Windows service, `%ProgramFiles%\Bline-X\`, `%ProgramData%\Bline-X\`, Bline-X firewall rules, and PATH entry.
