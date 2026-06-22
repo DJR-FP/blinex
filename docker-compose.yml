@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: blinex
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-blinex-secret}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       POSTGRES_DB: blinex
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -23,12 +23,12 @@ services:
     environment:
       MGMT_GRPC_ADDR: ":50051"
       MGMT_HTTP_ADDR: ":8080"
-      MGMT_JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      MGMT_JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env (min 32 chars)}"
       MGMT_ADMIN_PASSWORD: "${MGMT_ADMIN_PASSWORD:-}"
       MGMT_NETWORK_CIDR: "100.64.0.0/10"
       MGMT_DNS_SUFFIX: "blinex"
-      BLINEX_DEFAULT_KEY: "${BLINEX_DEFAULT_KEY:-BLINEX-DEFAULT-KEY}"
-      DATABASE_URL: "host=postgres user=blinex password=${POSTGRES_PASSWORD:-blinex-secret} dbname=blinex sslmode=disable"
+      BLINEX_DEFAULT_KEY: "${BLINEX_DEFAULT_KEY:?Set BLINEX_DEFAULT_KEY in .env}"
+      DATABASE_URL: "host=postgres user=blinex password=${POSTGRES_PASSWORD} dbname=blinex sslmode=disable"
     ports:
       - "50051:50051"
       - "8080:8080"
@@ -44,6 +44,7 @@ services:
     restart: unless-stopped
     environment:
       SIGNAL_ADDR: ":10000"
+      MGMT_JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env (min 32 chars)}"
     ports:
       - "10000:10000"
 
@@ -58,7 +59,7 @@ services:
       RELAY_UDP_PORT: "3478"
       RELAY_REALM: "blinex.co.uk"
       RELAY_AUTH_USER: "blinex"
-      RELAY_AUTH_PASS: "${RELAY_AUTH_PASS:-change-me-in-production}"
+      RELAY_AUTH_PASS: "${RELAY_AUTH_PASS:?Set RELAY_AUTH_PASS in .env}"
     ports:
       - "3478:3478/udp"
 

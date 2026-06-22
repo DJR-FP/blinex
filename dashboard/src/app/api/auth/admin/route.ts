@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-if (process.env.MGMT_TLS_VERIFY !== 'true') {
+if (process.env.MGMT_TLS_SKIP_VERIFY === 'true') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 }
 
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   const response = NextResponse.json({ ok: true })
   response.cookies.set('blinex_token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV !== 'development',
     sameSite: 'lax',
     maxAge: 60 * 60 * 24,
     path: '/',

@@ -220,7 +220,7 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			if err := routing.EnableForwarding(); err != nil {
 				log.Warn().Err(err).Msg("failed to enable IP forwarding")
 			}
-			if err := routing.AddMasquerade(); err != nil {
+			if err := routing.AddMasquerade(e.cfg.WGInterface); err != nil {
 				log.Warn().Err(err).Msg("failed to add iptables masquerade")
 			}
 			log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")

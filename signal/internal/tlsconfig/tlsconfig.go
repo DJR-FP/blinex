@@ -69,7 +69,7 @@ func generateSelfSigned() (tls.Certificate, error) {
 		DNSNames:              []string{"localhost", hostname},
 		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

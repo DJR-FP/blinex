@@ -20,24 +20,28 @@ func EnableForwarding() error {
 // AddMasquerade adds an iptables POSTROUTING MASQUERADE rule so that traffic
 // forwarded from the mesh is NATted to the device's external IP.
 // Idempotent — safe to call multiple times.
-func AddMasquerade() error {
-	// Check first to avoid duplicate rules.
-	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-j", "MASQUERADE").Run() == nil {
-		return nil
+func AddMasquerade(iface string) error {
+	// Scope to mesh source range only.
+	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "100.64.0.0/10", "-o", iface, "-j", "MASQUERADE").Run() != nil {
+		out, err := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("iptables masquerade: %w: %s", err, out)
+		}
 	}
-	out, err := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-j", "MASQUERADE").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("iptables masquerade: %w: %s", err, out)
+	if exec.Command("iptables", "-C", "FORWARD", "-i", iface, "-j", "ACCEPT").Run() != nil {
+		exec.Command("iptables", "-I", "FORWARD", "-i", iface, "-j", "ACCEPT").Run() //nolint:errcheck
 	}
-	// Accept all forwarded traffic (permissive; fine for a controlled VPN exit node).
-	exec.Command("iptables", "-I", "FORWARD", "-j", "ACCEPT").Run() //nolint:errcheck
+	if exec.Command("iptables", "-C", "FORWARD", "-o", iface, "-j", "ACCEPT").Run() != nil {
+		exec.Command("iptables", "-I", "FORWARD", "-o", iface, "-j", "ACCEPT").Run() //nolint:errcheck
+	}
 	return nil
 }
 
 // RemoveMasquerade removes the masquerade rule set by AddMasquerade.
-func RemoveMasquerade() {
-	exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-j", "MASQUERADE").Run() //nolint:errcheck
-	exec.Command("iptables", "-D", "FORWARD", "-j", "ACCEPT").Run()                      //nolint:errcheck
+func RemoveMasquerade(iface string) {
+	exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE").Run() //nolint:errcheck
+	exec.Command("iptables", "-D", "FORWARD", "-i", iface, "-j", "ACCEPT").Run()                                //nolint:errcheck
+	exec.Command("iptables", "-D", "FORWARD", "-o", iface, "-j", "ACCEPT").Run()                                //nolint:errcheck
 }
 
 // AddRoute installs an OS route for cidr via the named network interface.

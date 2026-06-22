@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -71,25 +73,28 @@ func (s *Server) registerRoutes() {
 	api.GET("/health", s.health)
 	api.POST("/auth/login", s.adminLogin)
 
-	auth := api.Group("/", s.authMiddleware())
+	authenticated := api.Group("/", s.authMiddleware())
+	admin := api.Group("/", s.authMiddleware(), s.adminOnly())
 
-	// Peers
-	auth.GET("/peers", s.listPeers)
-	auth.PUT("/peers/:key", s.updatePeer)
-	auth.DELETE("/peers/:key", s.deletePeer)
-	auth.PUT("/peers/:key/routes", s.setPeerRoutes)
-	auth.GET("/tags", s.listTags)
+	// Peers — read is available to all authenticated users
+	authenticated.GET("/peers", s.listPeers)
+	authenticated.GET("/tags", s.listTags)
 
-	// Setup keys
-	auth.GET("/setup-keys", s.listSetupKeys)
-	auth.POST("/setup-keys", s.createSetupKey)
-	auth.DELETE("/setup-keys/:id", s.deleteSetupKey)
+	// Peers — write operations require admin
+	admin.PUT("/peers/:key", s.updatePeer)
+	admin.DELETE("/peers/:key", s.deletePeer)
+	admin.PUT("/peers/:key/routes", s.setPeerRoutes)
 
-	// Access control rules
-	auth.GET("/rules", s.listRules)
-	auth.POST("/rules", s.createRule)
-	auth.PUT("/rules/:id", s.updateRule)
-	auth.DELETE("/rules/:id", s.deleteRule)
+	// Setup keys — admin only
+	admin.GET("/setup-keys", s.listSetupKeys)
+	admin.POST("/setup-keys", s.createSetupKey)
+	admin.DELETE("/setup-keys/:id", s.deleteSetupKey)
+
+	// Access control rules — read for all, write for admin
+	authenticated.GET("/rules", s.listRules)
+	admin.POST("/rules", s.createRule)
+	admin.PUT("/rules/:id", s.updateRule)
+	admin.DELETE("/rules/:id", s.deleteRule)
 }
 
 func (s *Server) health(c *gin.Context) {
@@ -125,6 +130,12 @@ func (s *Server) updatePeer(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	for _, t := range req.Tags {
+		if !isValidTag(t) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid tag %q: must be lowercase alphanumeric, hyphens, or underscores", t)})
+			return
+		}
 	}
 	peer.Tags = req.Tags
 	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
@@ -290,6 +301,12 @@ func (s *Server) deleteSetupKey(c *gin.Context) {
 }
 
 var validProtocols = map[string]bool{"tcp": true, "udp": true, "icmp": true, "all": true}
+
+var validTagRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+func isValidTag(t string) bool {
+	return len(t) > 0 && len(t) <= 64 && validTagRe.MatchString(t)
+}
 
 func validateRuleFields(src, dst, protocol string, port int) error {
 	for label, val := range map[string]string{"src": src, "dst": dst} {
@@ -471,11 +488,36 @@ func (s *Server) deleteRule(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+var (
+	loginAttempts   = make(map[string]int)
+	loginAttemptsMu sync.Mutex
+)
+
+func init() {
+	go func() {
+		for range time.NewTicker(time.Minute).C {
+			loginAttemptsMu.Lock()
+			loginAttempts = make(map[string]int)
+			loginAttemptsMu.Unlock()
+		}
+	}()
+}
+
 func (s *Server) adminLogin(c *gin.Context) {
 	if s.adminPassword == "" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "admin login is not enabled"})
 		return
 	}
+
+	ip := c.ClientIP()
+	loginAttemptsMu.Lock()
+	count := loginAttempts[ip]
+	loginAttemptsMu.Unlock()
+	if count >= 10 {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts, try again later"})
+		return
+	}
+
 	var req struct {
 		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
@@ -487,6 +529,9 @@ func (s *Server) adminLogin(c *gin.Context) {
 	userMatch := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.adminUser)) == 1
 	passMatch := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.adminPassword)) == 1
 	if !userMatch || !passMatch {
+		loginAttemptsMu.Lock()
+		loginAttempts[ip]++
+		loginAttemptsMu.Unlock()
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -511,6 +556,17 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 			return
 		}
 		c.Set("claims", claims)
+		c.Next()
+	}
+}
+
+func (s *Server) adminOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := claimsFromCtx(c)
+		if claims.Role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			return
+		}
 		c.Next()
 	}
 }

@@ -47,6 +47,7 @@ func (m *Manager) IssueToken(peerID, wgPubKey, accountID string) (string, error)
 		PeerID:    peerID,
 		WGPubKey:  wgPubKey,
 		AccountID: accountID,
+		Role:      "peer",
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),

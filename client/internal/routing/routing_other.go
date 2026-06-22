@@ -12,11 +12,11 @@ func EnableForwarding() error {
 	return fmt.Errorf("IP forwarding not supported on %s", runtime.GOOS)
 }
 
-func AddMasquerade() error {
+func AddMasquerade(iface string) error {
 	return fmt.Errorf("masquerade not supported on %s", runtime.GOOS)
 }
 
-func RemoveMasquerade() {}
+func RemoveMasquerade(iface string) {}
 
 func AddRoute(cidr, iface string) error {
 	return fmt.Errorf("OS routing not supported on %s", runtime.GOOS)

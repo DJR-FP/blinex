@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
-if (process.env.MGMT_TLS_VERIFY !== 'true') {
+// Only skip TLS verification when explicitly opted in (self-signed certs).
+if (process.env.MGMT_TLS_SKIP_VERIFY === 'true') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 }
 
