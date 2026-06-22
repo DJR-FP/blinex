@@ -8,6 +8,7 @@ import (
 	"time"
 
 	pion "github.com/pion/ice/v2"
+	"github.com/pion/logging"
 	"github.com/pion/stun"
 	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/rs/zerolog/log"
@@ -222,9 +223,13 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 	// Lexicographically smaller key = controller.
 	isController := m.selfKey < peerKey
 
+	logFactory := logging.NewDefaultLoggerFactory()
+	logFactory.DefaultLogLevel = logging.LogLevelDebug
+
 	agent, err := pion.NewAgent(&pion.AgentConfig{
-		NetworkTypes: []pion.NetworkType{pion.NetworkTypeUDP4, pion.NetworkTypeUDP6},
-		Urls:         m.stunURLs,
+		NetworkTypes:  []pion.NetworkType{pion.NetworkTypeUDP4},
+		Urls:          m.stunURLs,
+		LoggerFactory: logFactory,
 	})
 	if err != nil {
 		log.Error().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: agent create failed")
