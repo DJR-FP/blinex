@@ -285,21 +285,25 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 			Type:    signalv1.Body_OFFER,
 			Payload: marshalOffer(Offer{Ufrag: localUfrag, Pwd: localPwd}),
 		})
+		var remoteUfrag, remotePwd string
 		select {
 		case <-ctx.Done():
 			return
 		case answer := <-pc.answerCh:
-			if err := agent.SetRemoteCredentials(answer.Ufrag, answer.Pwd); err != nil {
+			remoteUfrag, remotePwd = answer.Ufrag, answer.Pwd
+			if err := agent.SetRemoteCredentials(remoteUfrag, remotePwd); err != nil {
 				return
 			}
 		}
-		conn, err = agent.Dial(ctx, localUfrag, localPwd)
+		conn, err = agent.Dial(ctx, remoteUfrag, remotePwd)
 	} else {
+		var remoteUfrag, remotePwd string
 		select {
 		case <-ctx.Done():
 			return
 		case offer := <-pc.offerCh:
-			if err := agent.SetRemoteCredentials(offer.Ufrag, offer.Pwd); err != nil {
+			remoteUfrag, remotePwd = offer.Ufrag, offer.Pwd
+			if err := agent.SetRemoteCredentials(remoteUfrag, remotePwd); err != nil {
 				return
 			}
 			m.signal.Send(peerKey, &signalv1.Body{ //nolint:errcheck
@@ -307,7 +311,7 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 				Payload: marshalAnswer(Answer{Ufrag: localUfrag, Pwd: localPwd}),
 			})
 		}
-		conn, err = agent.Accept(ctx, localUfrag, localPwd)
+		conn, err = agent.Accept(ctx, remoteUfrag, remotePwd)
 	}
 
 	if err != nil {
