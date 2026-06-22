@@ -205,7 +205,7 @@ const file_signal_v1_signal_proto_rawDesc = "" +
 	"\tCANDIDATE\x10\x02\x12\b\n" +
 	"\x04MODE\x10\x032C\n" +
 	"\rSignalService\x122\n" +
-	"\x04Send\x12\x12.signal.v1.Message\x1a\x12.signal.v1.Message(\x010\x01B+Z)github.com/blinex/gen/signal/v1;signalv1b\x06proto3"
+	"\x04Send\x12\x12.signal.v1.Message\x1a\x12.signal.v1.Message(\x010\x01B*Z(github.com/blinex/gen/signal/v1;signalv1b\x06proto3"
 
 var (
 	file_signal_v1_signal_proto_rawDescOnce sync.Once

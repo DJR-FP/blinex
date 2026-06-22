@@ -449,8 +449,8 @@ type Rule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Src           string                 `protobuf:"bytes,3,opt,name=src,proto3" json:"src,omitempty"`           // source CIDR, peer IP, or "*" for any
-	Dst           string                 `protobuf:"bytes,4,opt,name=dst,proto3" json:"dst,omitempty"`           // destination CIDR, peer IP, or "*" for any
+	Src           string                 `protobuf:"bytes,3,opt,name=src,proto3" json:"src,omitempty"`           // source: CIDR, peer IP, "tag:<name>", or "*"
+	Dst           string                 `protobuf:"bytes,4,opt,name=dst,proto3" json:"dst,omitempty"`           // destination: CIDR, peer IP, "tag:<name>", or "*"
 	Protocol      string                 `protobuf:"bytes,5,opt,name=protocol,proto3" json:"protocol,omitempty"` // "tcp", "udp", "icmp", "all"
 	Port          int32                  `protobuf:"varint,6,opt,name=port,proto3" json:"port,omitempty"`        // destination port; 0 = any
 	Action        string                 `protobuf:"bytes,7,opt,name=action,proto3" json:"action,omitempty"`     // "allow" or "deny"
@@ -603,7 +603,7 @@ const file_common_v1_types_proto_rawDesc = "" +
 	"\x04port\x18\x06 \x01(\x05R\x04port\x12\x16\n" +
 	"\x06action\x18\a \x01(\tR\x06action\x12\x18\n" +
 	"\aenabled\x18\b \x01(\bR\aenabled\x12\x1a\n" +
-	"\bpriority\x18\t \x01(\x05R\bpriorityB+Z)github.com/blinex/gen/common/v1;commonv1b\x06proto3"
+	"\bpriority\x18\t \x01(\x05R\bpriorityB*Z(github.com/blinex/gen/common/v1;commonv1b\x06proto3"
 
 var (
 	file_common_v1_types_proto_rawDescOnce sync.Once
