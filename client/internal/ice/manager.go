@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const iceTimeout = 30 * time.Second
+const iceTimeout = 90 * time.Second
 
 // Sender is the subset of signalclient.Client needed by the ICE manager.
 type Sender interface {
