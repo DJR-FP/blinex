@@ -212,9 +212,15 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 	var pbPeers []*commonv1.Peer
 	var routes []*commonv1.Route
 
+	// Build tag → IPs index for resolving tag-based rules.
+	tagIPs := make(map[string][]string)
 	for _, p := range peers {
-		// Merge peer CGNAT IP and any advertised routes into AllowedIps so
-		// receiving agents configure WireGuard with the correct allowed-IP set.
+		for _, t := range p.Tags {
+			tagIPs[t] = append(tagIPs[t], p.IP)
+		}
+	}
+
+	for _, p := range peers {
 		allowedIPs := make([]string, 0, len(p.AllowedIPs)+len(p.AdvertisedRoutes))
 		allowedIPs = append(allowedIPs, p.AllowedIPs...)
 		allowedIPs = append(allowedIPs, p.AdvertisedRoutes...)
@@ -242,17 +248,20 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 
 	var pbRules []*commonv1.Rule
 	for _, r := range domainRules {
-		pbRules = append(pbRules, &commonv1.Rule{
-			Id:       r.ID,
-			Name:     r.Name,
-			Src:      r.Src,
-			Dst:      r.Dst,
-			Protocol: r.Protocol,
-			Port:     int32(r.Port),
-			Action:   r.Action,
-			Enabled:  r.Enabled,
-			Priority: int32(r.Priority),
-		})
+		expanded := expandTagRule(r, tagIPs)
+		for _, er := range expanded {
+			pbRules = append(pbRules, &commonv1.Rule{
+				Id:       er.ID,
+				Name:     er.Name,
+				Src:      er.Src,
+				Dst:      er.Dst,
+				Protocol: er.Protocol,
+				Port:     int32(er.Port),
+				Action:   er.Action,
+				Enabled:  er.Enabled,
+				Priority: int32(er.Priority),
+			})
+		}
 	}
 
 	return &managementv1.SyncResponse{
@@ -261,6 +270,44 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 		Rules:  pbRules,
 		Serial: fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
+}
+
+func expandTagRule(r *domain.Rule, tagIPs map[string][]string) []*domain.Rule {
+	srcTag := strings.TrimPrefix(r.Src, "tag:")
+	dstTag := strings.TrimPrefix(r.Dst, "tag:")
+	hasSrcTag := strings.HasPrefix(r.Src, "tag:")
+	hasDstTag := strings.HasPrefix(r.Dst, "tag:")
+
+	if !hasSrcTag && !hasDstTag {
+		return []*domain.Rule{r}
+	}
+
+	srcIPs := []string{r.Src}
+	if hasSrcTag {
+		srcIPs = tagIPs[srcTag]
+		if len(srcIPs) == 0 {
+			return nil
+		}
+	}
+
+	dstIPs := []string{r.Dst}
+	if hasDstTag {
+		dstIPs = tagIPs[dstTag]
+		if len(dstIPs) == 0 {
+			return nil
+		}
+	}
+
+	var out []*domain.Rule
+	for _, s := range srcIPs {
+		for _, d := range dstIPs {
+			expanded := *r
+			expanded.Src = s
+			expanded.Dst = d
+			out = append(out, &expanded)
+		}
+	}
+	return out
 }
 
 // NotifyAccount triggers a sync push to all connected peers in the account.

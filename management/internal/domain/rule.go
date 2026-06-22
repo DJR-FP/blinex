@@ -9,8 +9,8 @@ type Rule struct {
 	ID        string    `json:"id"`
 	AccountID string    `json:"account_id"`
 	Name      string    `json:"name"`
-	Src       string    `json:"src"`      // source CIDR, peer IP, or "*"
-	Dst       string    `json:"dst"`      // destination CIDR, peer IP, or "*"
+	Src       string    `json:"src"`      // source: CIDR, peer IP, "tag:<name>", or "*"
+	Dst       string    `json:"dst"`      // destination: CIDR, peer IP, "tag:<name>", or "*"
 	Protocol  string    `json:"protocol"` // "tcp", "udp", "icmp", "all"
 	Port      int       `json:"port"`     // destination port; 0 = any
 	Action    string    `json:"action"`   // "allow" or "deny"

@@ -1,6 +1,6 @@
 # Bline-X
 
-[![Version](https://img.shields.io/badge/version-v0.5.0-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.7.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml)
@@ -15,7 +15,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 - **Stable IPs** — every device gets a permanent CGNAT IP (`100.64.x.x`) and a Magic DNS hostname (`device.blinex`)
 - **TLS encrypted control plane** — management and signal servers are TLS by default; self-signed cert generated automatically if none is provided
 - **Exit node / subnet routing** — advertise a LAN subnet or full exit node through any mesh device; toggle per device in the dashboard
-- **Access control rules** — source/destination/protocol/port policy editor; rules pushed to agents and enforced with iptables
+- **Tag-based access control** — group devices with tags (e.g. `tag:servers`, `tag:database`) and write ACL rules against groups; rules pushed to agents and enforced with iptables
 - **Admin login** — username/password dashboard access independent of any enrolled device; set `MGMT_ADMIN_PASSWORD` to enable
 - **Simple onboarding** — one `curl | bash` to enroll a device; JWT token appears in the dashboard
 - **Web dashboard** — manage devices, routes, access rules, and setup keys from a browser

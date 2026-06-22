@@ -11,6 +11,7 @@ type Peer struct {
 	OS               string    `json:"os"`
 	Kernel           string    `json:"kernel"`
 	DNSLabel         string    `json:"dns_label"`
+	Tags             []string  `json:"tags"`
 	AllowedIPs       []string  `json:"allowed_ips"`
 	AdvertisedRoutes []string  `json:"advertised_routes"` // CIDRs this peer advertises to the mesh
 	Connected        bool      `json:"connected"`

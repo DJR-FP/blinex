@@ -40,6 +40,7 @@ type peer struct {
 	OS               string
 	Kernel           string
 	DNSLabel         string
+	Tags             string // comma-separated
 	AllowedIPs       string // comma-separated
 	AdvertisedRoutes string // comma-separated CIDRs
 	Connected        bool
@@ -205,6 +206,7 @@ func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 		OS:               dp.OS,
 		Kernel:           dp.Kernel,
 		DNSLabel:         dp.DNSLabel,
+		Tags:             joinIPs(dp.Tags),
 		AllowedIPs:       joinIPs(dp.AllowedIPs),
 		AdvertisedRoutes: joinIPs(dp.AdvertisedRoutes),
 		Connected:        dp.Connected,
@@ -281,6 +283,7 @@ func toDomainPeer(p *peer) *domain.Peer {
 		OS:               p.OS,
 		Kernel:           p.Kernel,
 		DNSLabel:         p.DNSLabel,
+		Tags:             splitIPs(p.Tags),
 		AllowedIPs:       splitIPs(p.AllowedIPs),
 		AdvertisedRoutes: splitIPs(p.AdvertisedRoutes),
 		Connected:        p.Connected,

@@ -7,6 +7,7 @@ export interface Peer {
   hostname: string
   os: string
   dns_label: string
+  tags: string[]
   connected: boolean
   last_seen: string
   created_at: string
@@ -68,6 +69,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   peers: {
     list: () => request<{ peers: Peer[] }>('/peers'),
+    update: (key: string, payload: { tags: string[] }) =>
+      request<Peer>(`/peers/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
     delete: (key: string) =>
       request<void>(`/peers/${encodeURIComponent(key)}`, { method: 'DELETE' }),
     setRoutes: (key: string, routes: string[]) =>
@@ -75,6 +81,9 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ routes }),
       }),
+  },
+  tags: {
+    list: () => request<{ tags: string[] }>('/tags'),
   },
   setupKeys: {
     list: () => request<{ setup_keys: SetupKey[] }>('/setup-keys'),

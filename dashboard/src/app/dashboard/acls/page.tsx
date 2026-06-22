@@ -16,12 +16,75 @@ const emptyForm = (): RulePayload => ({
   priority: 100,
 })
 
+function TagOrIPInput({
+  label,
+  value,
+  onChange,
+  tags,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  tags: string[]
+  placeholder: string
+}) {
+  const mode = value === '*' ? 'any' : value.startsWith('tag:') ? 'tag' : 'ip'
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <div className="flex gap-1 mb-1.5">
+        {(['any', 'tag', 'ip'] as const).map(m => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => {
+              if (m === 'any') onChange('*')
+              else if (m === 'tag') onChange(tags.length > 0 ? `tag:${tags[0]}` : 'tag:')
+              else onChange('')
+            }}
+            className={`px-2 py-0.5 text-xs rounded font-medium transition-colors ${
+              mode === m
+                ? 'bg-brand-500 text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {m === 'any' ? 'Any' : m === 'tag' ? 'Tag' : 'IP/CIDR'}
+          </button>
+        ))}
+      </div>
+      {mode === 'tag' ? (
+        <select
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          value={value.replace('tag:', '')}
+          onChange={e => onChange(`tag:${e.target.value}`)}
+        >
+          {tags.length === 0 && <option value="">No tags defined</option>}
+          {tags.map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+      ) : mode === 'ip' ? (
+        <input
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          placeholder={placeholder}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+        />
+      ) : null}
+    </div>
+  )
+}
+
 function RuleModal({
   initial,
+  tags,
   onSave,
   onClose,
 }: {
   initial?: Rule
+  tags: string[]
   onSave: (p: RulePayload) => Promise<void>
   onClose: () => void
 }) {
@@ -65,40 +128,33 @@ function RuleModal({
           {initial ? 'Edit rule' : 'New rule'}
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
             <input
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              placeholder="e.g. Allow web traffic"
+              placeholder="e.g. Allow web to database"
               value={form.name}
               onChange={e => set('name', e.target.value)}
             />
           </div>
 
-          {/* Source / Destination */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
-              <input
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="* or 100.64.0.1 or CIDR"
-                value={form.src}
-                onChange={e => set('src', e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Destination</label>
-              <input
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="* or 100.64.0.2 or CIDR"
-                value={form.dst}
-                onChange={e => set('dst', e.target.value)}
-              />
-            </div>
+            <TagOrIPInput
+              label="Source"
+              value={form.src}
+              onChange={v => set('src', v)}
+              tags={tags}
+              placeholder="100.64.0.1 or CIDR"
+            />
+            <TagOrIPInput
+              label="Destination"
+              value={form.dst}
+              onChange={v => set('dst', v)}
+              tags={tags}
+              placeholder="100.64.0.2 or CIDR"
+            />
           </div>
 
-          {/* Protocol / Port */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Protocol</label>
@@ -127,7 +183,6 @@ function RuleModal({
             </div>
           </div>
 
-          {/* Action / Priority */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
@@ -154,7 +209,6 @@ function RuleModal({
             </div>
           </div>
 
-          {/* Enabled toggle */}
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -189,16 +243,34 @@ function RuleModal({
   )
 }
 
+function formatSrcDst(val: string) {
+  if (val.startsWith('tag:')) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium">
+          {val}
+        </span>
+      </span>
+    )
+  }
+  return <span className="font-mono text-gray-600">{val}</span>
+}
+
 export default function ACLsPage() {
   const [rules, setRules] = useState<Rule[]>([])
+  const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modal, setModal] = useState<{ open: boolean; editing?: Rule }>({ open: false })
 
-  const fetchRules = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const data = await api.rules.list()
-      setRules(data.rules ?? [])
+      const [rulesData, tagsData] = await Promise.all([
+        api.rules.list(),
+        api.tags.list(),
+      ])
+      setRules(rulesData.rules ?? [])
+      setTags(tagsData.tags ?? [])
     } catch (err) {
       setError(String(err))
     } finally {
@@ -206,7 +278,7 @@ export default function ACLsPage() {
     }
   }, [])
 
-  useEffect(() => { fetchRules() }, [fetchRules])
+  useEffect(() => { fetchData() }, [fetchData])
 
   const handleSave = async (payload: RulePayload) => {
     if (modal.editing) {
@@ -214,13 +286,13 @@ export default function ACLsPage() {
     } else {
       await api.rules.create(payload)
     }
-    await fetchRules()
+    await fetchData()
   }
 
   const handleToggle = async (rule: Rule) => {
     try {
       await api.rules.update(rule.id, { enabled: !rule.enabled })
-      await fetchRules()
+      await fetchData()
     } catch (err) {
       setError(String(err))
     }
@@ -230,7 +302,7 @@ export default function ACLsPage() {
     if (!confirm(`Delete rule "${rule.name}"?`)) return
     try {
       await api.rules.delete(rule.id)
-      await fetchRules()
+      await fetchData()
     } catch (err) {
       setError(String(err))
     }
@@ -244,7 +316,7 @@ export default function ACLsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Access Rules</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Control which devices can communicate. Rules evaluated in priority order (lowest first).
+            Control which devices can communicate. Use tags (e.g. <code className="text-xs bg-gray-100 px-1 rounded">tag:servers</code>) or IPs. Rules evaluated in priority order.
           </p>
         </div>
         <button
@@ -265,10 +337,9 @@ export default function ACLsPage() {
         <div className="text-center text-gray-400 py-12">Loading…</div>
       ) : sortedRules.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
-          <p className="text-4xl mb-4">🔒</p>
           <p className="font-medium text-gray-700">Default policy: allow all</p>
           <p className="text-sm mt-1">
-            All enrolled devices can reach each other. Add rules to restrict access.
+            All enrolled devices can reach each other. Add rules with tags to restrict access.
           </p>
         </div>
       ) : (
@@ -308,8 +379,8 @@ export default function ACLsPage() {
                 <tr key={rule.id} className={`hover:bg-gray-50 transition-colors ${!rule.enabled ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3 text-gray-400">{rule.priority}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{rule.name}</td>
-                  <td className="px-4 py-3 font-mono text-gray-600">{rule.src}</td>
-                  <td className="px-4 py-3 font-mono text-gray-600">{rule.dst}</td>
+                  <td className="px-4 py-3">{formatSrcDst(rule.src)}</td>
+                  <td className="px-4 py-3">{formatSrcDst(rule.dst)}</td>
                   <td className="px-4 py-3 text-gray-600">{rule.protocol}</td>
                   <td className="px-4 py-3 text-gray-600">{rule.port === 0 ? 'any' : rule.port}</td>
                   <td className="px-4 py-3">
@@ -363,6 +434,7 @@ export default function ACLsPage() {
       {modal.open && (
         <RuleModal
           initial={modal.editing}
+          tags={tags}
           onSave={handleSave}
           onClose={() => setModal({ open: false })}
         />

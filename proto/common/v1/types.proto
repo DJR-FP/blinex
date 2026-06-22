@@ -51,8 +51,8 @@ message NameServer {
 message Rule {
   string id       = 1;
   string name     = 2;
-  string src      = 3; // source CIDR, peer IP, or "*" for any
-  string dst      = 4; // destination CIDR, peer IP, or "*" for any
+  string src      = 3; // source: CIDR, peer IP, "tag:<name>", or "*"
+  string dst      = 4; // destination: CIDR, peer IP, "tag:<name>", or "*"
   string protocol = 5; // "tcp", "udp", "icmp", "all"
   int32  port     = 6; // destination port; 0 = any
   string action   = 7; // "allow" or "deny"

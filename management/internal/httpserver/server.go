@@ -75,8 +75,10 @@ func (s *Server) registerRoutes() {
 
 	// Peers
 	auth.GET("/peers", s.listPeers)
+	auth.PUT("/peers/:key", s.updatePeer)
 	auth.DELETE("/peers/:key", s.deletePeer)
 	auth.PUT("/peers/:key/routes", s.setPeerRoutes)
+	auth.GET("/tags", s.listTags)
 
 	// Setup keys
 	auth.GET("/setup-keys", s.listSetupKeys)
@@ -103,6 +105,59 @@ func (s *Server) listPeers(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"peers": peers})
+}
+
+func (s *Server) updatePeer(c *gin.Context) {
+	key := c.Param("key")
+	claims := claimsFromCtx(c)
+	peer, err := s.store.GetPeer(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "peer not found"})
+		return
+	}
+	if peer.AccountID != claims.AccountID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		Tags []string `json:"tags"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	peer.Tags = req.Tags
+	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
+		log.Error().Err(err).Msg("updatePeer")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	s.notify(claims.AccountID)
+	c.JSON(http.StatusOK, peer)
+}
+
+func (s *Server) listTags(c *gin.Context) {
+	claims := claimsFromCtx(c)
+	peers, err := s.store.GetPeersByAccount(c.Request.Context(), claims.AccountID)
+	if err != nil {
+		log.Error().Err(err).Msg("listTags")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	seen := make(map[string]bool)
+	var tags []string
+	for _, p := range peers {
+		for _, t := range p.Tags {
+			if !seen[t] {
+				seen[t] = true
+				tags = append(tags, t)
+			}
+		}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{"tags": tags})
 }
 
 func (s *Server) deletePeer(c *gin.Context) {
@@ -241,9 +296,15 @@ func validateRuleFields(src, dst, protocol string, port int) error {
 		if val == "*" {
 			continue
 		}
+		if strings.HasPrefix(val, "tag:") {
+			if len(val) <= 4 {
+				return fmt.Errorf("%s tag name cannot be empty", label)
+			}
+			continue
+		}
 		if net.ParseIP(val) == nil {
 			if _, _, err := net.ParseCIDR(val); err != nil {
-				return fmt.Errorf("%s must be '*', a valid IP, or a CIDR", label)
+				return fmt.Errorf("%s must be '*', 'tag:<name>', a valid IP, or a CIDR", label)
 			}
 		}
 	}

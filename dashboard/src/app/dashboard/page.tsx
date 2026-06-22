@@ -37,6 +37,11 @@ export default function DevicesPage() {
     setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, advertised_routes: routes, ...resp.peer } : p))
   }
 
+  const handleTagsChange = async (key: string, tags: string[]) => {
+    const updated = await api.peers.update(key, { tags })
+    setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, tags: updated.tags } : p))
+  }
+
   const connected = peers.filter(p => p.connected).length
   const installCmd = `curl -fsSL https://install.blinex.co.uk/agent | BLINEX_SETUP_KEY=<your-key> bash`
 
@@ -94,7 +99,7 @@ export default function DevicesPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {peers.map(p => (
-          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} />
+          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} onTagsChange={handleTagsChange} />
         ))}
       </div>
     </div>
