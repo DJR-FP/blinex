@@ -235,6 +235,22 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 	pc.agent = agent
 	defer agent.Close()
 
+	if err := agent.OnConnectionStateChange(func(state pion.ConnectionState) {
+		log.Info().Str("peer", shortKey(peerKey)).Str("state", state.String()).Msg("ICE: connection state changed")
+	}); err != nil {
+		return
+	}
+
+	if err := agent.OnSelectedCandidatePairChange(func(local, remote pion.Candidate) {
+		log.Info().
+			Str("peer", shortKey(peerKey)).
+			Str("local", fmt.Sprintf("%s %s:%d", local.Type(), local.Address(), local.Port())).
+			Str("remote", fmt.Sprintf("%s %s:%d", remote.Type(), remote.Address(), remote.Port())).
+			Msg("ICE: selected candidate pair")
+	}); err != nil {
+		return
+	}
+
 	if err := agent.OnCandidate(func(c pion.Candidate) {
 		if c == nil {
 			return
@@ -301,10 +317,8 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 			return
 		case answer := <-pc.answerCh:
 			remoteUfrag, remotePwd = answer.Ufrag, answer.Pwd
-			if err := agent.SetRemoteCredentials(remoteUfrag, remotePwd); err != nil {
-				return
-			}
 		}
+		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: got ANSWER, starting Dial")
 		conn, err = agent.Dial(ctx, remoteUfrag, remotePwd)
 	} else {
 		var remoteUfrag, remotePwd string
@@ -313,14 +327,12 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 			return
 		case offer := <-pc.offerCh:
 			remoteUfrag, remotePwd = offer.Ufrag, offer.Pwd
-			if err := agent.SetRemoteCredentials(remoteUfrag, remotePwd); err != nil {
-				return
-			}
 			m.signal.Send(peerKey, &signalv1.Body{ //nolint:errcheck
 				Type:    signalv1.Body_ANSWER,
 				Payload: marshalAnswer(Answer{Ufrag: localUfrag, Pwd: localPwd}),
 			})
 		}
+		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: sent ANSWER, starting Accept")
 		conn, err = agent.Accept(ctx, remoteUfrag, remotePwd)
 	}
 
