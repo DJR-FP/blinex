@@ -63,7 +63,7 @@ func New(selfKey string, stunHosts []string, signal Sender) *Manager {
 	}
 }
 
-// StartConnect initiates ICE towards peerKey (idempotent).
+// StartConnect initiates ICE towards peerKey (idempotent while running).
 func (m *Manager) StartConnect(ctx context.Context, peerKey string) {
 	m.mu.Lock()
 	if _, exists := m.peers[peerKey]; exists {
@@ -75,7 +75,58 @@ func (m *Manager) StartConnect(ctx context.Context, peerKey string) {
 	m.peers[peerKey] = pc
 	m.mu.Unlock()
 
-	go m.runPeer(pCtx, peerKey, pc)
+	go m.runPeerWithRetry(pCtx, peerKey)
+}
+
+func (m *Manager) runPeerWithRetry(ctx context.Context, peerKey string) {
+	backoff := 5 * time.Second
+	const maxBackoff = 60 * time.Second
+
+	for {
+		m.mu.Lock()
+		pc, exists := m.peers[peerKey]
+		if !exists {
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Unlock()
+
+		m.runPeer(ctx, peerKey, pc)
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Check if peer was intentionally removed (ClosePeer called).
+		m.mu.RLock()
+		_, stillTracked := m.peers[peerKey]
+		m.mu.RUnlock()
+		if !stillTracked {
+			return
+		}
+
+		log.Debug().Str("peer", shortKey(peerKey)).Dur("backoff", backoff).Msg("ICE: retrying connection")
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		// Re-create peerConn for the next attempt.
+		m.mu.Lock()
+		if _, ok := m.peers[peerKey]; !ok {
+			m.mu.Unlock()
+			return
+		}
+		newPC := newPeerConn(pc.cancel)
+		m.peers[peerKey] = newPC
+		m.mu.Unlock()
+
+		backoff = min(backoff*2, maxBackoff)
+	}
 }
 
 // ClosePeer tears down ICE for a specific peer.
@@ -157,14 +208,6 @@ func (m *Manager) HandleSignal(msg *signalv1.Message) {
 
 // runPeer runs the full ICE lifecycle for one peer.
 func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
-	defer func() {
-		m.mu.Lock()
-		if m.peers[peerKey] == pc {
-			delete(m.peers, peerKey)
-		}
-		m.mu.Unlock()
-	}()
-
 	// Lexicographically smaller key = controller.
 	isController := m.selfKey < peerKey
 
