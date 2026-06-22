@@ -138,3 +138,4 @@ else
 fi
 
 info "Done! Your device will appear in the dashboard once connected."
+info "To uninstall: curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/uninstall.sh | sudo bash"
