@@ -9,6 +9,9 @@ set -euo pipefail
 BLINEX_SETUP_KEY="${BLINEX_SETUP_KEY:-}"
 BLINEX_MANAGEMENT_URL="${BLINEX_MANAGEMENT_URL:-localhost:50051}"
 BLINEX_SIGNAL_URL="${BLINEX_SIGNAL_URL:-localhost:10000}"
+BLINEX_RELAY_URL="${BLINEX_RELAY_URL:-}"
+BLINEX_TURN_USER="${BLINEX_TURN_USER:-blinex}"
+BLINEX_TURN_PASS="${BLINEX_TURN_PASS:-}"
 BLINEX_WG_IFACE="${BLINEX_WG_IFACE:-blinex0}"
 BLINEX_STATE_DIR="${BLINEX_STATE_DIR:-/var/lib/blinex}"
 BLINEX_INSTALL_DIR="${BLINEX_INSTALL_DIR:-/usr/local/bin}"
@@ -73,6 +76,15 @@ mv /tmp/blinex-agent "${BLINEX_INSTALL_DIR}/blinex-agent"
 # Create state and config dirs
 mkdir -p "${BLINEX_STATE_DIR}" /etc/blinex
 
+# Build STUN/TURN URL list
+MGMT_HOST=$(echo "${BLINEX_MANAGEMENT_URL}" | cut -d: -f1)
+STUN_URLS="\"stun:stun.l.google.com:19302\""
+if [ -n "${BLINEX_RELAY_URL}" ]; then
+  STUN_URLS="${STUN_URLS}, \"turn:${BLINEX_RELAY_URL}?transport=udp\""
+elif [ "${MGMT_HOST}" != "localhost" ]; then
+  STUN_URLS="${STUN_URLS}, \"turn:${MGMT_HOST}:3478?transport=udp\""
+fi
+
 # Write config
 cat > /etc/blinex/agent.json <<EOF
 {
@@ -80,7 +92,11 @@ cat > /etc/blinex/agent.json <<EOF
   "signal_url": "${BLINEX_SIGNAL_URL}",
   "setup_key": "${BLINEX_SETUP_KEY}",
   "wg_interface": "${BLINEX_WG_IFACE}",
-  "state_dir": "${BLINEX_STATE_DIR}"
+  "state_dir": "${BLINEX_STATE_DIR}",
+  "stun_urls": [${STUN_URLS}],
+  "turn_user": "${BLINEX_TURN_USER}",
+  "turn_pass": "${BLINEX_TURN_PASS}",
+  "tls_skip_verify": true
 }
 EOF
 chmod 600 /etc/blinex/agent.json

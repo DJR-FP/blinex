@@ -80,7 +80,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("signal client: %w", err)
 	}
 
-	iceMgr := ice.New(wg.PublicKey(), cfg.STUNURLs, sig)
+	iceMgr := ice.New(wg.PublicKey(), cfg.STUNURLs, cfg.TURNUser, cfg.TURNPass, sig)
 	dnsResolver := dns.New("127.0.0.1:53535", "blinex", cfg.DNSUpstream)
 
 	return &Engine{

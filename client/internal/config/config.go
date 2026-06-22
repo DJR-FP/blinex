@@ -16,6 +16,8 @@ type Config struct {
 	WGInterface   string   `json:"wg_interface"` // e.g. "blinex0"
 	StateDir      string   `json:"state_dir"`    // dir for state.json
 	STUNURLs      []string `json:"stun_urls"`    // e.g. ["stun:stun.l.google.com:19302"]
+	TURNUser      string   `json:"turn_user"`    // TURN long-term credential username
+	TURNPass      string   `json:"turn_pass"`    // TURN long-term credential password
 	LogLevel      string   `json:"log_level"`
 	DNSUpstream   string   `json:"dns_upstream"` // upstream DNS resolver, e.g. "8.8.8.8:53"
 	// TLS options for connecting to management and signal servers.
@@ -39,6 +41,8 @@ func Load(path string) (*Config, error) {
 		StateDir:      getEnv("BLINEX_STATE_DIR", "/var/lib/blinex"),
 		LogLevel:      getEnv("LOG_LEVEL", "info"),
 		STUNURLs:      parseList(getEnv("BLINEX_STUN_URLS", "stun:stun.l.google.com:19302")),
+		TURNUser:      getEnv("BLINEX_TURN_USER", ""),
+		TURNPass:      getEnv("BLINEX_TURN_PASS", ""),
 		DNSUpstream:   getEnv("BLINEX_DNS_UPSTREAM", "8.8.8.8:53"),
 		// Default to skip-verify so the agent works with self-signed server certs.
 		// TOFU fingerprint pinning is used automatically in this mode.

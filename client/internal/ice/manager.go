@@ -28,6 +28,8 @@ type ConnectCallback func(peerKey, endpoint string, conn net.Conn)
 type Manager struct {
 	selfKey  string
 	stunURLs []*stun.URI
+	turnUser string
+	turnPass string
 	signal   Sender
 
 	OnConnected ConnectCallback
@@ -53,11 +55,20 @@ func newPeerConn(cancel context.CancelFunc) *peerConn {
 	}
 }
 
-// New creates an ICE Manager. stunHosts are full URIs like "stun:host:port".
-func New(selfKey string, stunHosts []string, signal Sender) *Manager {
+// New creates an ICE Manager. stunHosts are full URIs like "stun:host:port" or "turn:host:port".
+func New(selfKey string, stunHosts []string, turnUser, turnPass string, signal Sender) *Manager {
+	urls := parseSTUNURLs(stunHosts)
+	for _, u := range urls {
+		if u.Scheme == stun.SchemeTypeTURN || u.Scheme == stun.SchemeTypeTURNS {
+			u.Username = turnUser
+			u.Password = turnPass
+		}
+	}
 	return &Manager{
 		selfKey:  selfKey,
-		stunURLs: parseSTUNURLs(stunHosts),
+		stunURLs: urls,
+		turnUser: turnUser,
+		turnPass: turnPass,
 		signal:   signal,
 		peers:    make(map[string]*peerConn),
 	}
