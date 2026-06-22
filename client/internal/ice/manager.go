@@ -237,6 +237,11 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 		if c == nil {
 			return
 		}
+		log.Debug().
+			Str("peer", shortKey(peerKey)).
+			Str("type", c.Type().String()).
+			Str("addr", c.Address()+":"+fmt.Sprintf("%d", c.Port())).
+			Msg("ICE: local candidate gathered")
 		m.signal.Send(peerKey, &signalv1.Body{ //nolint:errcheck
 			Type:    signalv1.Body_CANDIDATE,
 			Payload: marshalCandidate(Candidate{Candidate: c.Marshal()}),
