@@ -1,6 +1,6 @@
 # Bline-X
 
-[![Version](https://img.shields.io/badge/version-v0.7.2-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.7.3-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml)
@@ -277,6 +277,7 @@ curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/install.sh
   BLINEX_SETUP_KEY=YOUR_KEY \
   BLINEX_MANAGEMENT_URL=your-server:50051 \
   BLINEX_SIGNAL_URL=your-server:10000 \
+  BLINEX_TURN_PASS=your-relay-password \
   sudo -E bash
 ```
 
@@ -285,6 +286,9 @@ curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/install.sh
 | `BLINEX_SETUP_KEY` | _(required)_ | Enrollment key from the Setup Keys page |
 | `BLINEX_MANAGEMENT_URL` | `localhost:50051` | Management server gRPC address |
 | `BLINEX_SIGNAL_URL` | `localhost:10000` | Signal server address |
+| `BLINEX_TURN_PASS` | _(empty)_ | TURN relay password (must match `RELAY_AUTH_PASS` on server) |
+| `BLINEX_TURN_USER` | `blinex` | TURN relay username |
+| `BLINEX_RELAY_URL` | _(auto-detected)_ | TURN relay host:port (defaults to management host:3478) |
 | `BLINEX_VERSION` | `latest` | Pin a specific release version |
 
 The agent prints a JWT on first enrollment — paste it into the dashboard to sign in.
