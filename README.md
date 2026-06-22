@@ -274,10 +274,18 @@ docker compose up -d
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/install.sh | \
-  BLINEX_SETUP_KEY=BLINEX-DEFAULT-KEY \
+  BLINEX_SETUP_KEY=YOUR_KEY \
   BLINEX_MANAGEMENT_URL=your-server:50051 \
-  bash
+  BLINEX_SIGNAL_URL=your-server:10000 \
+  sudo -E bash
 ```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BLINEX_SETUP_KEY` | _(required)_ | Enrollment key from the Setup Keys page |
+| `BLINEX_MANAGEMENT_URL` | `localhost:50051` | Management server gRPC address |
+| `BLINEX_SIGNAL_URL` | `localhost:10000` | Signal server address |
+| `BLINEX_VERSION` | `latest` | Pin a specific release version |
 
 The agent prints a JWT on first enrollment — paste it into the dashboard to sign in.
 
