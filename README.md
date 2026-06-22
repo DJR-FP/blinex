@@ -612,6 +612,52 @@ buf generate
 
 ---
 
+## Troubleshooting
+
+### Dashboard shows "cannot reach management server"
+
+The dashboard can't proxy API requests to the management server internally.
+
+1. Check the dashboard can reach management: `docker compose exec dashboard sh -c "wget -q -O- --no-check-certificate https://management:8080/api/v1/health"`
+2. If using self-signed certs, add `MGMT_TLS_SKIP_VERIFY=true` to the dashboard environment in `docker-compose.yml`
+3. After changing environment variables, recreate the container (not just restart): `docker compose down dashboard && docker compose up -d dashboard`
+
+### Agent: TOFU server certificate changed
+
+The server's TLS cert was regenerated (e.g. after rebuilding containers). Delete the agent's pinned cert:
+
+```bash
+sudo rm /var/lib/blinex/state.json
+sudo systemctl restart blinex-agent
+```
+
+### Agent: authentication handshake failed
+
+Set `"tls_skip_verify": true` in `/etc/blinex/agent.json` when using self-signed server certs, then restart.
+
+### Agent: no known endpoint for peer
+
+ICE negotiation hasn't completed. Verify:
+- The other peer is online
+- Signal server is reachable: `nc -zv your-server 10000`
+- STUN/TURN relay is reachable: `nc -zuv your-server 3478`
+
+### Docker compose fails with "variable is not set"
+
+The new docker-compose requires all secrets via environment variables. Copy `.env.example` to `.env` and fill in the values:
+
+```bash
+cp .env.example .env
+# Edit .env — set JWT_SECRET, POSTGRES_PASSWORD, BLINEX_DEFAULT_KEY, RELAY_AUTH_PASS
+docker compose up -d
+```
+
+### Agent crashes with protobuf panic (exit code 2)
+
+Version mismatch between agent and server. Make sure both are running the same version. Rebuild the server images (`docker compose build && docker compose up -d`) and reinstall the agent.
+
+---
+
 ## Roadmap
 
 ### Next up

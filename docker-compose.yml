@@ -72,6 +72,7 @@ services:
     restart: unless-stopped
     environment:
       MGMT_API_URL: "${MGMT_API_URL:-https://management:8080}"
+      MGMT_TLS_SKIP_VERIFY: "${MGMT_TLS_SKIP_VERIFY:-true}"
     ports:
       - "3000:3000"
     depends_on:

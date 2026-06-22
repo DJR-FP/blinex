@@ -118,3 +118,85 @@ Removes: `io.blinex.agent` launchd service, binary, config, state, and log file.
 Download `blinex-uninstall-windows-amd64.exe` from the [latest release](https://github.com/DJR-FP/blinex-agent/releases) and run it as Administrator.
 
 Removes: `BlinexAgent` Windows service, `%ProgramFiles%\Bline-X\`, `%ProgramData%\Bline-X\`, Bline-X firewall rules, and PATH entry.
+
+## Troubleshooting
+
+### Agent crashes immediately (exit code 2, protobuf panic)
+
+```
+panic: runtime error: slice bounds out of range [-2:]
+github.com/blinex/gen/common/v1.file_common_v1_types_proto_init()
+```
+
+**Cause:** Agent binary version doesn't match the server's protobuf schema. Usually happens after an upgrade.
+
+**Fix:** Make sure the agent and server are running the same version. Re-download the latest agent binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DJR-FP/blinex-agent/main/install.sh | \
+  BLINEX_SETUP_KEY=YOUR_KEY \
+  BLINEX_MANAGEMENT_URL=your-server:50051 \
+  BLINEX_SIGNAL_URL=your-server:10000 \
+  sudo -E bash
+```
+
+### TOFU: server certificate changed
+
+```
+TOFU: server certificate changed for mesh.example.com:50051 (pinned=2aaff671...)
+```
+
+**Cause:** The server's TLS certificate was regenerated (e.g. after rebuilding containers), but the agent still has the old certificate pinned in its state file.
+
+**Fix:** Delete the state file and restart:
+
+```bash
+sudo rm /var/lib/blinex/state.json
+sudo systemctl restart blinex-agent
+```
+
+### Authentication handshake failed
+
+```
+transport: authentication handshake failed
+```
+
+**Cause:** The agent can't verify the server's TLS certificate. Common with self-signed certs.
+
+**Fix:** Set `tls_skip_verify` to `true` in `/etc/blinex/agent.json`:
+
+```json
+{
+  "management_url": "your-server:50051",
+  "signal_url": "your-server:10000",
+  "setup_key": "YOUR_KEY",
+  "tls_skip_verify": true
+}
+```
+
+Then `sudo systemctl restart blinex-agent`.
+
+### No known endpoint for peer
+
+```
+peer(zIVl…np3g) - Failed to send handshake initiation: no known endpoint for peer
+```
+
+**Cause:** ICE negotiation hasn't completed. The WireGuard layer is trying to reach a peer before the ICE connection is established.
+
+**Fix:** Check that:
+1. The other peer is actually online and running the agent
+2. The signal server is reachable: `nc -zv your-server 10000`
+3. The STUN/TURN relay is reachable: `nc -zuv your-server 3478`
+4. Firewalls allow UDP traffic between peers for hole-punching
+
+### TUN device unavailable — using netstack mode
+
+```
+/dev/net/tun not available, attempting to create it
+TUN device unavailable — using userspace netstack mode
+```
+
+**Cause:** The kernel TUN device isn't available. Common in LXC/LXD containers and on Windows/macOS.
+
+**Fix:** This is informational, not an error. The agent falls back to userspace networking (netstack), which works without kernel TUN support. Performance may be slightly lower than kernel mode. On Linux VMs, ensure the `tun` kernel module is loaded: `sudo modprobe tun`.
