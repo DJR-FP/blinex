@@ -1,9 +1,9 @@
 # management
 
-[![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fdjr--fp%2Foverlay%2Fmanagement-blue?logo=docker)](https://ghcr.io/djr-fp/overlay/management)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fdjr--fp%2Foverlay%2Fmanagement-blue?logo=docker)](https://ghcr.io/djr-fp/blinex/management)
 
 ```bash
-docker pull ghcr.io/djr-fp/overlay/management:latest
+docker pull ghcr.io/djr-fp/blinex/management:latest
 ```
 
 Management server — the control plane for Bline-X. Handles device enrollment, IP allocation, peer list distribution, and the REST API consumed by the dashboard.

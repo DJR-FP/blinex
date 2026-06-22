@@ -10,7 +10,7 @@ on:
 env:
   REGISTRY: ghcr.io
   OWNER: djr-fp
-  REPO: overlay
+  REPO: blinex
 
 jobs:
   # Read the VERSION file once; all build jobs use it.

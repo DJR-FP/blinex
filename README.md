@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/badge/version-v0.7.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
-[![Build](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/overlay/actions/workflows/docker.yml)
+[![Build](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml)
 
 A zero-trust WireGuard mesh VPN — open-source core, built for SMB and developer teams. Think Tailscale/NetBird, but simpler to self-host and extend.
 
@@ -121,10 +121,10 @@ Pre-built images are published to GitHub Container Registry. Every push to `main
 
 | Image | Pull command |
 |---|---|
-| Management | `docker pull ghcr.io/djr-fp/overlay/management:latest` |
-| Signal | `docker pull ghcr.io/djr-fp/overlay/signal:latest` |
-| Relay | `docker pull ghcr.io/djr-fp/overlay/relay:latest` |
-| Dashboard | `docker pull ghcr.io/djr-fp/overlay/dashboard:latest` |
+| Management | `docker pull ghcr.io/djr-fp/blinex/management:latest` |
+| Signal | `docker pull ghcr.io/djr-fp/blinex/signal:latest` |
+| Relay | `docker pull ghcr.io/djr-fp/blinex/relay:latest` |
+| Dashboard | `docker pull ghcr.io/djr-fp/blinex/dashboard:latest` |
 
 Pin a specific release: replace `:latest` with `:v0.3.0`.
 

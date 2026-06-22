@@ -15,7 +15,7 @@ services:
       retries: 10
 
   management:
-    image: ghcr.io/djr-fp/overlay/management:latest
+    image: ghcr.io/djr-fp/blinex/management:latest
     build:
       context: .
       dockerfile: management/Dockerfile
@@ -37,7 +37,7 @@ services:
         condition: service_healthy
 
   signal:
-    image: ghcr.io/djr-fp/overlay/signal:latest
+    image: ghcr.io/djr-fp/blinex/signal:latest
     build:
       context: .
       dockerfile: signal/Dockerfile
@@ -48,7 +48,7 @@ services:
       - "10000:10000"
 
   relay:
-    image: ghcr.io/djr-fp/overlay/relay:latest
+    image: ghcr.io/djr-fp/blinex/relay:latest
     build:
       context: .
       dockerfile: relay/Dockerfile
@@ -63,7 +63,7 @@ services:
       - "3478:3478/udp"
 
   dashboard:
-    image: ghcr.io/djr-fp/overlay/dashboard:latest
+    image: ghcr.io/djr-fp/blinex/dashboard:latest
     build:
       context: ./dashboard
       args:
