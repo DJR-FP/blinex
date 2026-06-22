@@ -111,13 +111,20 @@ func (m *Manager) runPeerWithRetry(ctx context.Context, peerKey string) {
 		default:
 		}
 
-		// Check if peer was intentionally removed (ClosePeer called).
 		m.mu.RLock()
 		_, stillTracked := m.peers[peerKey]
 		m.mu.RUnlock()
 		if !stillTracked {
 			return
 		}
+
+		// Create the new peerConn BEFORE the backoff wait so that
+		// incoming signal messages (offers, answers, candidates)
+		// during the wait are buffered in the new channels.
+		m.mu.Lock()
+		newPC := newPeerConn(pc.cancel)
+		m.peers[peerKey] = newPC
+		m.mu.Unlock()
 
 		log.Debug().Str("peer", shortKey(peerKey)).Dur("backoff", backoff).Msg("ICE: retrying connection")
 
@@ -126,16 +133,6 @@ func (m *Manager) runPeerWithRetry(ctx context.Context, peerKey string) {
 			return
 		case <-time.After(backoff):
 		}
-
-		// Re-create peerConn for the next attempt.
-		m.mu.Lock()
-		if _, ok := m.peers[peerKey]; !ok {
-			m.mu.Unlock()
-			return
-		}
-		newPC := newPeerConn(pc.cancel)
-		m.peers[peerKey] = newPC
-		m.mu.Unlock()
 
 		backoff = min(backoff*2, maxBackoff)
 	}
