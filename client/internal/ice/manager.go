@@ -276,9 +276,17 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 			case raw := <-pc.candidateCh:
 				c, err := pion.UnmarshalCandidate(raw)
 				if err != nil {
+					log.Warn().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: failed to unmarshal remote candidate")
 					continue
 				}
-				_ = agent.AddRemoteCandidate(c)
+				log.Debug().
+					Str("peer", shortKey(peerKey)).
+					Str("type", c.Type().String()).
+					Str("addr", c.Address()+":"+fmt.Sprintf("%d", c.Port())).
+					Msg("ICE: remote candidate added")
+				if err := agent.AddRemoteCandidate(c); err != nil {
+					log.Warn().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: AddRemoteCandidate failed")
+				}
 			}
 		}
 	}()
