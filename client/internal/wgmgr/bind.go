@@ -14,7 +14,7 @@ import (
 // WireGuard traffic for that peer is routed through its ICE conn rather than raw UDP.
 type IceBind struct {
 	mu     sync.RWMutex
-	conns  map[netip.AddrPort]net.Conn // endpoint addr → ICE conn
+	conns  map[netip.AddrPort]net.Conn // endpoint addr → conn
 	recvCh chan recvPacket
 	doneCh chan struct{}
 	once   sync.Once
@@ -33,8 +33,8 @@ func NewIceBind() *IceBind {
 	}
 }
 
-// AddConn registers an ICE-established net.Conn for the given remote endpoint
-// and starts a receive loop that feeds packets into WireGuard.
+// AddConn registers a net.Conn for the given remote endpoint.
+// For relay conns, use InjectRecv instead to bypass the receive loop.
 func (b *IceBind) AddConn(endpointStr string, c net.Conn) error {
 	ap, err := netip.ParseAddrPort(endpointStr)
 	if err != nil {
@@ -46,6 +46,28 @@ func (b *IceBind) AddConn(endpointStr string, c net.Conn) error {
 
 	go b.receiveLoop(ap, c)
 	return nil
+}
+
+// RegisterConn registers a conn for sending without starting a receiveLoop.
+func (b *IceBind) RegisterConn(endpointStr string, c net.Conn) error {
+	ap, err := netip.ParseAddrPort(endpointStr)
+	if err != nil {
+		return fmt.Errorf("parsing endpoint %q: %w", endpointStr, err)
+	}
+	b.mu.Lock()
+	b.conns[ap] = c
+	b.mu.Unlock()
+	return nil
+}
+
+// InjectRecv directly injects a received packet into WireGuard's receive path.
+func (b *IceBind) InjectRecv(data []byte, src netip.AddrPort) {
+	pkt := make([]byte, len(data))
+	copy(pkt, data)
+	select {
+	case b.recvCh <- recvPacket{data: pkt, src: src}:
+	case <-b.doneCh:
+	}
 }
 
 // RemoveConn removes and closes the ICE conn for an endpoint.

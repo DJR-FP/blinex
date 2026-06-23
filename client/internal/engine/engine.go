@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"runtime"
 	"time"
@@ -46,7 +47,8 @@ type Engine struct {
 	dns           *dns.Resolver
 	peers         *peer.Manager
 	forwarder     *wgmgr.Forwarder
-	relayConns    map[string]*relay.Conn // peerKey → relay connection
+	relayConns    map[string]*relay.Conn      // peerKey → relay connection (for sending)
+	relayEndpts   map[string]netip.AddrPort  // peerKey → virtual endpoint address
 	appliedRoutes map[string][]string   // peerKey → route CIDRs currently installed in OS
 	exitNode      *exitNodeState        // non-nil when exit node routing is active
 	ctx           context.Context
@@ -94,6 +96,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		dns:           dnsResolver,
 		peers:         peer.New(),
 		relayConns:    make(map[string]*relay.Conn),
+		relayEndpts:   make(map[string]netip.AddrPort),
 		appliedRoutes: make(map[string][]string),
 	}, nil
 }
@@ -159,23 +162,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	sigErrCh := make(chan error, 1)
 	go func() {
 		err := e.sig.Connect(ctx, loginResp.Token, func(msg *signalv1.Message) {
-			if msg.Body != nil {
-				log.Debug().
-					Str("from", shortKey(msg.Key)).
-					Int32("type", int32(msg.Body.Type)).
-					Int("data_len", len(msg.Body.Data)).
-					Int("payload_len", len(msg.Body.Payload)).
-					Msg("signal: received message")
-			}
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
-				if rc, ok := e.relayConns[msg.Key]; ok {
-					rc.Deliver(msg.Body.Data)
-				} else {
-					log.Warn().
-						Str("from", shortKey(msg.Key)).
-						Int("data_len", len(msg.Body.Data)).
-						Int("relay_conns", len(e.relayConns)).
-						Msg("relay: no conn for sender key")
+				if ep, ok := e.relayEndpts[msg.Key]; ok {
+					e.wg.Bind().InjectRecv(msg.Body.Data, ep)
 				}
 				return
 			}
@@ -279,13 +268,25 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 
 		// Create relay connection via signal server (DERP-style).
+		// Sending: WireGuard → IceBind.Send → relay.Conn.Write → signal server
+		// Receiving: signal server → InjectRecv → IceBind.recvCh → WireGuard
 		rc := relay.New(e.wg.PublicKey(), p.WgPubKey, e.sig)
 		e.relayConns[p.WgPubKey] = rc
 		endpoint := rc.Endpoint()
-		if err := e.wg.UpdateEndpoint(p.WgPubKey, endpoint, rc); err != nil {
+		ep, _ := netip.ParseAddrPort(endpoint)
+		e.relayEndpts[p.WgPubKey] = ep
+
+		// Register the relay conn for SENDING only (no receiveLoop).
+		// Receiving is handled by InjectRecv in the signal handler.
+		if err := e.wg.Bind().RegisterConn(endpoint, rc); err != nil {
+			log.Error().Err(err).Msg("relay: RegisterConn failed")
+		}
+
+		// Tell WireGuard about this peer's endpoint.
+		if err := e.wg.SetPeerEndpoint(p.WgPubKey, endpoint); err != nil {
 			log.Error().Err(err).Str("peer", shortKey(p.WgPubKey)).Msg("relay endpoint setup failed")
 		} else {
-			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Msg("peer added, relay connected via signal")
+			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Str("endpoint", endpoint).Msg("peer added, relay connected via signal")
 		}
 
 		// ICE disabled — relay via signal server is the primary data path.

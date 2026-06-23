@@ -158,6 +158,16 @@ func (m *Manager) UpsertPeer(pubKeyB64 string, allowedIPs []string, endpoint str
 	return m.dev.IpcSet(sb.String())
 }
 
+// SetPeerEndpoint sets the endpoint of an existing WireGuard peer without registering a conn.
+func (m *Manager) SetPeerEndpoint(pubKeyB64 string, endpoint string) error {
+	pubKeyRaw, err := base64.StdEncoding.DecodeString(pubKeyB64)
+	if err != nil {
+		return err
+	}
+	pubHex := hex.EncodeToString(pubKeyRaw)
+	return m.dev.IpcSet(fmt.Sprintf("public_key=%s\nendpoint=%s\n", pubHex, endpoint))
+}
+
 // UpdateEndpoint sets/updates the endpoint of an existing peer and registers
 // the ICE net.Conn with the bind layer.
 func (m *Manager) UpdateEndpoint(pubKeyB64 string, endpoint string, iceConn net.Conn) error {
