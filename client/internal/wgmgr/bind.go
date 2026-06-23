@@ -90,6 +90,9 @@ func (b *IceBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
 			n := copy(bufs[0], pkt.data)
 			sizes[0] = n
 			eps[0] = &IceEndpoint{addrPort: pkt.src}
+			if n > 0 {
+				fmt.Printf("[bind] recv %d bytes from %s (type=%d)\n", n, pkt.src, bufs[0][0])
+			}
 			return 1, nil
 		}
 	}
@@ -117,7 +120,7 @@ func (b *IceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	c, found := b.conns[ice.addrPort]
 	b.mu.RUnlock()
 	if !found {
-		return fmt.Errorf("no ICE conn for %s", ice.addrPort)
+		return fmt.Errorf("no conn for endpoint %s (have %d conns)", ice.addrPort, len(b.conns))
 	}
 	for _, buf := range bufs {
 		if _, err := c.Write(buf); err != nil {
