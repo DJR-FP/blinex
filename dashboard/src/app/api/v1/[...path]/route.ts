@@ -8,14 +8,17 @@ if (process.env.MGMT_TLS_SKIP_VERIFY === 'true') {
 
 const MGMT_URL = process.env.MGMT_API_URL ?? 'https://localhost:8080'
 
-async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse> {
+async function proxy(req: NextRequest): Promise<NextResponse> {
   const cookieStore = cookies()
   const token = cookieStore.get('blinex_token')?.value
   if (!token) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const path = segments.join('/')
+  // Use the raw, still percent-encoded path. The catch-all params decode
+  // %2F into a literal '/', which would split base64 WireGuard keys and
+  // break the upstream route. nextUrl.pathname preserves the encoding.
+  const path = req.nextUrl.pathname.replace(/^\/api\/v1\//, '')
   const url = `${MGMT_URL}/api/v1/${path}${req.nextUrl.search}`
 
   const body =
@@ -43,9 +46,7 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
   return NextResponse.json(data, { status: upstream.status })
 }
 
-type Ctx = { params: { path: string[] } }
-
-export const GET = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params.path)
-export const POST = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params.path)
-export const PUT = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params.path)
-export const DELETE = (req: NextRequest, ctx: Ctx) => proxy(req, ctx.params.path)
+export const GET = (req: NextRequest) => proxy(req)
+export const POST = (req: NextRequest) => proxy(req)
+export const PUT = (req: NextRequest) => proxy(req)
+export const DELETE = (req: NextRequest) => proxy(req)
