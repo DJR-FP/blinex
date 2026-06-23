@@ -24,6 +24,10 @@ RUN addgroup -S blinex && adduser -S blinex -G blinex
 
 COPY --from=builder /signal /usr/local/bin/signal
 
+# Persistent state dir (self-signed TLS cert) owned by the runtime user.
+RUN mkdir -p /var/lib/blinex && chown blinex:blinex /var/lib/blinex
+VOLUME ["/var/lib/blinex"]
+
 USER blinex
 
 EXPOSE 10000

@@ -19,6 +19,7 @@ type Config struct {
 	DefaultKey    string // seed setup key value
 	TLSCertFile   string // path to TLS certificate PEM; empty = self-signed
 	TLSKeyFile    string // path to TLS private key PEM; empty = self-signed
+	TLSStateDir   string // dir to persist the self-signed cert across restarts
 	AdminUser     string // dashboard admin username; default "admin"
 	AdminPassword string // dashboard admin password; empty = admin login disabled
 }
@@ -54,6 +55,7 @@ func Load() *Config {
 		DefaultKey:  defaultKey,
 		TLSCertFile:   getEnv("TLS_CERT_FILE", ""),
 		TLSKeyFile:    getEnv("TLS_KEY_FILE", ""),
+		TLSStateDir:   getEnv("TLS_STATE_DIR", "/var/lib/blinex"),
 		AdminUser:     getEnv("MGMT_ADMIN_USER", "admin"),
 		AdminPassword: getEnv("MGMT_ADMIN_PASSWORD", ""),
 	}

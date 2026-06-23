@@ -28,6 +28,11 @@ RUN addgroup -S blinex && adduser -S blinex -G blinex
 
 COPY --from=builder /management /usr/local/bin/management
 
+# Persistent state dir (self-signed TLS cert) owned by the runtime user.
+# A named volume mounted here inherits this ownership on first creation.
+RUN mkdir -p /var/lib/blinex && chown blinex:blinex /var/lib/blinex
+VOLUME ["/var/lib/blinex"]
+
 USER blinex
 
 EXPOSE 50051 8080

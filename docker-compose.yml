@@ -29,6 +29,8 @@ services:
       MGMT_DNS_SUFFIX: "blinex"
       BLINEX_DEFAULT_KEY: "${BLINEX_DEFAULT_KEY:?Set BLINEX_DEFAULT_KEY in .env}"
       DATABASE_URL: "host=postgres user=blinex password=${POSTGRES_PASSWORD} dbname=blinex sslmode=disable"
+    volumes:
+      - management_state:/var/lib/blinex
     ports:
       - "50051:50051"
       - "8080:8080"
@@ -45,6 +47,8 @@ services:
     environment:
       SIGNAL_ADDR: ":10000"
       MGMT_JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env (min 32 chars)}"
+    volumes:
+      - signal_state:/var/lib/blinex
     ports:
       - "10000:10000"
 
@@ -83,6 +87,8 @@ services:
 
 volumes:
   postgres_data:
+  management_state:
+  signal_state:
 
 networks:
   default:

@@ -27,12 +27,13 @@ func main() {
 	tlsCfg, selfSigned, err := tlsconfig.Load(
 		getEnv("TLS_CERT_FILE", ""),
 		getEnv("TLS_KEY_FILE", ""),
+		getEnv("TLS_STATE_DIR", "/var/lib/blinex"),
 	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("TLS setup failed")
 	}
 	if selfSigned {
-		log.Warn().Msg("using self-signed TLS certificate — set TLS_CERT_FILE + TLS_KEY_FILE for production")
+		log.Warn().Msg("using persistent self-signed TLS certificate (set TLS_CERT_FILE + TLS_KEY_FILE for a real cert)")
 	}
 
 	lis, err := net.Listen("tcp", addr)

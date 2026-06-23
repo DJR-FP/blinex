@@ -31,12 +31,12 @@ func main() {
 
 	cfg := config.Load()
 
-	tlsCfg, selfSigned, err := tlsconfig.Load(cfg.TLSCertFile, cfg.TLSKeyFile)
+	tlsCfg, selfSigned, err := tlsconfig.Load(cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSStateDir)
 	if err != nil {
 		log.Fatal().Err(err).Msg("TLS setup failed")
 	}
 	if selfSigned {
-		log.Warn().Msg("using self-signed TLS certificate — set TLS_CERT_FILE + TLS_KEY_FILE for production")
+		log.Warn().Msg("using persistent self-signed TLS certificate (set TLS_CERT_FILE + TLS_KEY_FILE for a real cert)")
 	}
 
 	var st store.Store
