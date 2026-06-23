@@ -26,6 +26,9 @@ func Start(cfg Config) error {
 		return fmt.Errorf("failed to listen UDP %s: %w", udpAddr, err)
 	}
 
+	logFactory := logging.NewDefaultLoggerFactory()
+	logFactory.DefaultLogLevel = logging.LogLevelDebug
+
 	s, err := turn.NewServer(turn.ServerConfig{
 		Realm: cfg.Realm,
 		AuthHandler: func(username, realm string, srcAddr net.Addr) ([]byte, bool) {
@@ -45,7 +48,7 @@ func Start(cfg Config) error {
 				},
 			},
 		},
-		LoggerFactory: logging.NewDefaultLoggerFactory(),
+		LoggerFactory: logFactory,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create TURN server: %w", err)

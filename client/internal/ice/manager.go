@@ -199,6 +199,7 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 	agent, err := pion.NewAgent(&pion.AgentConfig{
 		NetworkTypes:        []pion.NetworkType{pion.NetworkTypeUDP4},
 		Urls:                m.stunURLs,
+		CandidateTypes:      []pion.CandidateType{pion.CandidateTypeHost, pion.CandidateTypeServerReflexive, pion.CandidateTypeRelay},
 		LoggerFactory:       logFactory,
 		DisconnectedTimeout: durationPtr(iceTimeout),
 		FailedTimeout:       durationPtr(iceTimeout),
