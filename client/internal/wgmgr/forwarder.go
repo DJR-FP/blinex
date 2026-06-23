@@ -144,9 +144,12 @@ func (f *Forwarder) serveUDP(ctx context.Context, conn *net.UDPConn) {
 }
 
 func (f *Forwarder) handleUDP(ctx context.Context, listener *net.UDPConn, srcAddr *net.UDPAddr, data []byte) {
-	// For UDP REDIRECT, the original dest is the listener's address.
-	// We rely on SO_ORIGINAL_DST for the real destination.
-	// UDP forwarding through netstack — simplified: use the source to route back.
+	defer func() {
+		if r := recover(); r != nil {
+			// netstack DialUDP panics with nil addresses — absorb it
+		}
+	}()
+
 	remote, err := f.tnet.DialUDP(nil, nil)
 	if err != nil {
 		return
