@@ -137,7 +137,9 @@ func (f *Forwarder) serveUDP(ctx context.Context, conn *net.UDPConn) {
 			}
 			continue
 		}
-		go f.handleUDP(ctx, conn, srcAddr, buf[:n])
+		pkt := make([]byte, n)
+		copy(pkt, buf[:n])
+		go f.handleUDP(ctx, conn, srcAddr, pkt)
 	}
 }
 
