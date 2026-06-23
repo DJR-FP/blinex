@@ -224,9 +224,12 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 	logFactory.DefaultLogLevel = logging.LogLevelDebug
 
 	agent, err := pion.NewAgent(&pion.AgentConfig{
-		NetworkTypes:  []pion.NetworkType{pion.NetworkTypeUDP4},
-		Urls:          m.stunURLs,
-		LoggerFactory: logFactory,
+		NetworkTypes:        []pion.NetworkType{pion.NetworkTypeUDP4},
+		Urls:                m.stunURLs,
+		LoggerFactory:       logFactory,
+		DisconnectedTimeout: durationPtr(iceTimeout),
+		FailedTimeout:       durationPtr(iceTimeout),
+		CheckInterval:       durationPtr(500 * time.Millisecond),
 	})
 	if err != nil {
 		log.Error().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: agent create failed")
@@ -367,6 +370,8 @@ func parseSTUNURLs(hosts []string) []*stun.URI {
 	}
 	return urls
 }
+
+func durationPtr(d time.Duration) *time.Duration { return &d }
 
 func shortKey(k string) string {
 	if len(k) > 8 {
