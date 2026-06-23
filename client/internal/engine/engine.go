@@ -159,6 +159,14 @@ func (e *Engine) Run(ctx context.Context) error {
 	sigErrCh := make(chan error, 1)
 	go func() {
 		err := e.sig.Connect(ctx, loginResp.Token, func(msg *signalv1.Message) {
+			if msg.Body != nil {
+				log.Debug().
+					Str("from", shortKey(msg.Key)).
+					Int32("type", int32(msg.Body.Type)).
+					Int("data_len", len(msg.Body.Data)).
+					Int("payload_len", len(msg.Body.Payload)).
+					Msg("signal: received message")
+			}
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
 				if rc, ok := e.relayConns[msg.Key]; ok {
 					rc.Deliver(msg.Body.Data)
