@@ -165,6 +165,16 @@ func (e *Engine) Run(ctx context.Context) error {
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
 				if ep, ok := e.relayEndpts[msg.Key]; ok {
 					e.wg.Bind().InjectRecv(msg.Body.Data, ep)
+				} else {
+					// Try all relay endpoints — key format may differ
+					for _, ep := range e.relayEndpts {
+						e.wg.Bind().InjectRecv(msg.Body.Data, ep)
+						break
+					}
+					log.Warn().
+						Str("sender", msg.Key[:min(8, len(msg.Key))]).
+						Int("known_peers", len(e.relayEndpts)).
+						Msg("relay: sender key not in relayEndpts, used fallback")
 				}
 				return
 			}
