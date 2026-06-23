@@ -26,6 +26,9 @@ type Config struct {
 	// Set TLSCACert to pin a specific CA cert PEM file instead.
 	TLSSkipVerify bool   `json:"tls_skip_verify"`
 	TLSCACert     string `json:"tls_ca_cert"` // path to CA cert PEM
+
+	// Version is the agent build version, set by main (not from JSON/env).
+	Version string `json:"-"`
 }
 
 func Load(path string) (*Config, error) {

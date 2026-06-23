@@ -28,8 +28,17 @@ export default function DevicesPage() {
   }, [load])
 
   const handleDelete = async (key: string) => {
-    await api.peers.delete(key)
-    setPeers(prev => prev.filter(p => p.wg_pub_key !== key))
+    try {
+      await api.peers.delete(key)
+      setPeers(prev => prev.filter(p => p.wg_pub_key !== key))
+    } catch (e) {
+      const msg = String(e)
+      if (msg.includes('403')) {
+        setError('Delete requires admin login. Sign in via the Admin login tab (a device token cannot delete peers).')
+      } else {
+        setError(`Failed to delete peer: ${msg}`)
+      }
+    }
   }
 
   const handleRoutesChange = async (key: string, routes: string[]) => {

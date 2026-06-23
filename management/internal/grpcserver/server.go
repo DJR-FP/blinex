@@ -206,6 +206,7 @@ func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePee
 		peer.Hostname = req.Meta.Hostname
 		peer.OS = req.Meta.Os
 		peer.Kernel = req.Meta.Kernel
+		peer.Version = req.Meta.CoreVersion
 		peer.DNSLabel = toDNSLabel(req.Meta.Hostname)
 	}
 	peer.LastSeen = time.Now()

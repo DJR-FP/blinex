@@ -10,6 +10,7 @@ type Peer struct {
 	Hostname         string    `json:"hostname"`
 	OS               string    `json:"os"`
 	Kernel           string    `json:"kernel"`
+	Version          string    `json:"version"` // agent version reported via PeerMeta
 	DNSLabel         string    `json:"dns_label"`
 	Tags             []string  `json:"tags"`
 	AllowedIPs       []string  `json:"allowed_ips"`

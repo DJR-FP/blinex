@@ -6,6 +6,7 @@ export interface Peer {
   ip: string
   hostname: string
   os: string
+  version: string
   dns_label: string
   tags: string[]
   connected: boolean

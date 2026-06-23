@@ -130,7 +130,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		Hostname:    hostname,
 		Os:          runtime.GOOS,
 		Kernel:      runtime.GOARCH,
-		CoreVersion: "0.1.0",
+		CoreVersion: e.cfg.Version,
 	}
 
 	loginResp, err := e.enrollWithRetry(ctx, meta)

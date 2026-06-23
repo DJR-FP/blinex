@@ -26,6 +26,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load config")
 	}
+	cfg.Version = version
 
 	eng, err := engine.New(cfg)
 	if err != nil {
