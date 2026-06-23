@@ -28,6 +28,7 @@ const (
 	Body_ANSWER    Body_Type = 1
 	Body_CANDIDATE Body_Type = 2
 	Body_MODE      Body_Type = 3
+	Body_RELAY     Body_Type = 4 // WireGuard packet relay (DERP-style)
 )
 
 // Enum value maps for Body_Type.
@@ -37,12 +38,14 @@ var (
 		1: "ANSWER",
 		2: "CANDIDATE",
 		3: "MODE",
+		4: "RELAY",
 	}
 	Body_Type_value = map[string]int32{
 		"OFFER":     0,
 		"ANSWER":    1,
 		"CANDIDATE": 2,
 		"MODE":      3,
+		"RELAY":     4,
 	}
 )
 
@@ -136,7 +139,8 @@ func (x *Message) GetBody() *Body {
 type Body struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          Body_Type              `protobuf:"varint,1,opt,name=type,proto3,enum=signal.v1.Body_Type" json:"type,omitempty"`
-	Payload       string                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"` // JSON-encoded ICE candidate, offer, or answer
+	Payload       string                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"` // JSON-encoded ICE offer or answer
+	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`       // raw packet data for RELAY type
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -185,6 +189,13 @@ func (x *Body) GetPayload() string {
 	return ""
 }
 
+func (x *Body) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 var File_signal_v1_signal_proto protoreflect.FileDescriptor
 
 const file_signal_v1_signal_proto_rawDesc = "" +
@@ -194,16 +205,18 @@ const file_signal_v1_signal_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1d\n" +
 	"\n" +
 	"remote_key\x18\x02 \x01(\tR\tremoteKey\x12#\n" +
-	"\x04body\x18\x03 \x01(\v2\x0f.signal.v1.BodyR\x04body\"\x82\x01\n" +
+	"\x04body\x18\x03 \x01(\v2\x0f.signal.v1.BodyR\x04body\"\xa1\x01\n" +
 	"\x04Body\x12(\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x14.signal.v1.Body.TypeR\x04type\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\tR\apayload\"6\n" +
+	"\apayload\x18\x02 \x01(\tR\apayload\x12\x12\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\"A\n" +
 	"\x04Type\x12\t\n" +
 	"\x05OFFER\x10\x00\x12\n" +
 	"\n" +
 	"\x06ANSWER\x10\x01\x12\r\n" +
 	"\tCANDIDATE\x10\x02\x12\b\n" +
-	"\x04MODE\x10\x032C\n" +
+	"\x04MODE\x10\x03\x12\t\n" +
+	"\x05RELAY\x10\x042C\n" +
 	"\rSignalService\x122\n" +
 	"\x04Send\x12\x12.signal.v1.Message\x1a\x12.signal.v1.Message(\x010\x01B*Z(github.com/blinex/gen/signal/v1;signalv1b\x06proto3"
 

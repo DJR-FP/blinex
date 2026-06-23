@@ -18,12 +18,14 @@ message Message {
 
 message Body {
   Type   type    = 1;
-  string payload = 2; // JSON-encoded ICE candidate, offer, or answer
+  string payload = 2; // JSON-encoded ICE offer or answer
+  bytes  data    = 3; // raw packet data for RELAY type
 
   enum Type {
     OFFER     = 0;
     ANSWER    = 1;
     CANDIDATE = 2;
     MODE      = 3;
+    RELAY     = 4; // WireGuard packet relay (DERP-style)
   }
 }
