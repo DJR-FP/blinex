@@ -267,7 +267,7 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		// Create relay connection via signal server (DERP-style).
 		rc := relay.New(e.wg.PublicKey(), p.WgPubKey, e.sig)
 		e.relayConns[p.WgPubKey] = rc
-		endpoint := rc.RemoteAddr().String()
+		endpoint := rc.Endpoint()
 		if err := e.wg.UpdateEndpoint(p.WgPubKey, endpoint, rc); err != nil {
 			log.Error().Err(err).Str("peer", shortKey(p.WgPubKey)).Msg("relay endpoint setup failed")
 		} else {

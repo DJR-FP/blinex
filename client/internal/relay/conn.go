@@ -1,13 +1,17 @@
 package relay
 
 import (
+	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/rs/zerolog/log"
 )
+
+var relayCounter atomic.Uint32
 
 // Sender sends a signal message to a remote peer.
 type Sender interface {
@@ -23,16 +27,19 @@ type Conn struct {
 	recvCh    chan []byte
 	closed    chan struct{}
 	closeOnce sync.Once
+	addr      *relayAddr
 }
 
 // New creates a relay connection to a specific peer via the signal server.
 func New(selfKey, peerKey string, signal Sender) *Conn {
+	n := relayCounter.Add(1)
 	return &Conn{
 		selfKey: selfKey,
 		peerKey: peerKey,
 		signal:  signal,
 		recvCh:  make(chan []byte, 256),
 		closed:  make(chan struct{}),
+		addr:    &relayAddr{ip: net.IPv4(127, 127, byte(n>>8), byte(n)), port: 1},
 	}
 }
 
@@ -78,25 +85,31 @@ func (c *Conn) Close() error {
 }
 
 func (c *Conn) LocalAddr() net.Addr {
-	return &relayAddr{key: c.selfKey}
+	return &relayAddr{ip: net.IPv4(127, 127, 0, 0), port: 0}
 }
 
 func (c *Conn) RemoteAddr() net.Addr {
-	return &relayAddr{key: c.peerKey}
+	return c.addr
 }
 
 func (c *Conn) SetDeadline(t time.Time) error      { return nil }
 func (c *Conn) SetReadDeadline(t time.Time) error   { return nil }
 func (c *Conn) SetWriteDeadline(t time.Time) error  { return nil }
 
-type relayAddr struct{ key string }
+// Endpoint returns a parseable ip:port string for WireGuard.
+// Uses 127.127.0.x:1 as a virtual address space for relay peers.
+func (c *Conn) Endpoint() string {
+	return c.addr.String()
+}
 
-func (a *relayAddr) Network() string { return "relay" }
+type relayAddr struct {
+	ip   net.IP
+	port int
+}
+
+func (a *relayAddr) Network() string { return "udp" }
 func (a *relayAddr) String() string {
-	if len(a.key) > 8 {
-		return "relay:" + a.key[:8]
-	}
-	return "relay:" + a.key
+	return fmt.Sprintf("%s:%d", a.ip, a.port)
 }
 
 func min(a, b int) int {
