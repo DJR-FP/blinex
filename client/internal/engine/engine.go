@@ -162,6 +162,12 @@ func (e *Engine) Run(ctx context.Context) error {
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
 				if rc, ok := e.relayConns[msg.Key]; ok {
 					rc.Deliver(msg.Body.Data)
+				} else {
+					log.Warn().
+						Str("from", shortKey(msg.Key)).
+						Int("data_len", len(msg.Body.Data)).
+						Int("relay_conns", len(e.relayConns)).
+						Msg("relay: no conn for sender key")
 				}
 				return
 			}
