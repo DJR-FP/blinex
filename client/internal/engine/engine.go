@@ -19,6 +19,7 @@ import (
 	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/blinex/client/internal/acl"
 	"github.com/blinex/client/internal/config"
+	"github.com/blinex/client/internal/controlapi"
 	"github.com/blinex/client/internal/dns"
 	"github.com/blinex/client/internal/ice"
 	"github.com/blinex/client/internal/mgmclient"
@@ -56,6 +57,10 @@ type Engine struct {
 	appliedRoutes map[string][]string       // peerKey → route CIDRs currently installed in OS
 	exitNode      *exitNodeState            // non-nil when exit node routing is active
 	ctx           context.Context
+
+	selfIP     string             // own mesh IP (CIDR), set after enrollment
+	lastRoutes []*commonv1.Route  // routes from the most recent sync (for status)
+	ctrlClose  func()             // stops the local control socket
 }
 
 // New creates an Engine. Loads or generates the WireGuard private key from state.
@@ -138,8 +143,18 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("enrollment failed: %w", err)
 	}
 
+	e.selfIP = loginResp.NetworkConfig.Address
+
 	if err := e.wg.SetAddress(loginResp.NetworkConfig.Address); err != nil {
 		return fmt.Errorf("setting WireGuard address: %w", err)
+	}
+
+	// Local control socket for `blinex-agent status|peers|routes`.
+	if closeFn, err := controlapi.Serve(controlapi.DefaultSocket, e.Status); err != nil {
+		log.Warn().Err(err).Msg("control socket unavailable (status CLI disabled)")
+	} else {
+		e.ctrlClose = closeFn
+		defer closeFn()
 	}
 
 	// In netstack mode, start the transparent forwarder so local processes
@@ -205,6 +220,74 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 }
 
+// Status builds a live snapshot of the agent state for the control socket.
+func (e *Engine) Status() controlapi.Status {
+	hostname, _ := os.Hostname()
+	selfKey := e.wg.PublicKey()
+
+	mode := "kernel"
+	if e.wg.NetstackMode() {
+		mode = "netstack"
+	}
+
+	st := controlapi.Status{
+		Version:   e.cfg.Version,
+		Hostname:  hostname,
+		SelfIP:    e.selfIP,
+		Interface: e.cfg.WGInterface,
+		Mode:      mode,
+		DNSSuffix: "blinex",
+	}
+
+	// pubkey → hostname for resolving route gateways.
+	keyToName := map[string]string{selfKey: hostname}
+
+	for _, p := range e.peers.All() {
+		if p.WgPubKey == selfKey {
+			continue
+		}
+		keyToName[p.WgPubKey] = p.Hostname
+		path := "relay"
+		e.mu.Lock()
+		link := e.links[p.WgPubKey]
+		e.mu.Unlock()
+		if link != nil && link.UsingICE() {
+			path = "direct"
+		}
+		dnsName := ""
+		if p.DnsLabel != "" {
+			dnsName = p.DnsLabel + "." + st.DNSSuffix
+		}
+		st.Peers = append(st.Peers, controlapi.PeerInfo{
+			Hostname: p.Hostname,
+			IP:       p.Ip,
+			DNSName:  dnsName,
+			Path:     path,
+		})
+	}
+
+	e.mu.Lock()
+	routes := e.lastRoutes
+	e.mu.Unlock()
+	for _, r := range routes {
+		via := keyToName[r.Gateway]
+		self := r.Gateway == selfKey
+		if self {
+			via = "this device"
+		} else if via == "" {
+			via = shortKey(r.Gateway)
+		}
+		st.Routes = append(st.Routes, controlapi.RouteInfo{
+			Network: r.Network,
+			Via:     via,
+			Self:    self,
+			Enabled: r.Enabled,
+		})
+	}
+
+	return st
+}
+
 func (e *Engine) enrollWithRetry(ctx context.Context, meta *commonv1.PeerMeta) (*managementv1.LoginResponse, error) {
 	backoff := time.Second
 	for {
@@ -226,6 +309,9 @@ func (e *Engine) enrollWithRetry(ctx context.Context, meta *commonv1.PeerMeta) (
 
 func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 	selfKey := e.wg.PublicKey()
+	e.mu.Lock()
+	e.lastRoutes = resp.Routes
+	e.mu.Unlock()
 
 	// Build gateway → route CIDRs map from this sync response.
 	routesByGateway := make(map[string][]string)

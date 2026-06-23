@@ -30,25 +30,55 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 ┌──────────────────────── Control Plane (TLS) ────────────────────────┐
 │                                                                       │
 │   Management Server           Signal Server        Relay Server      │
-│   gRPC/TLS :50051             ICE candidate        STUN/TURN         │
-│   HTTPS    :8080              relay (bidi gRPC/TLS) UDP :3478        │
-│   JWT auth · REST API         :10000               pion/turn         │
-│   PostgreSQL / in-memory                                              │
+│   gRPC/TLS :50051             gRPC/TLS :10000       STUN/TURN         │
+│   HTTPS    :8080              · ICE signaling       UDP :3478         │
+│   JWT auth · REST API         · WireGuard packet    pion/turn         │
+│   peers · tags · ACLs           relay (DERP-style)  (direct-path      │
+│   PostgreSQL / in-memory                             NAT assist)      │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
               ▲                         ▲
-              │ gRPC/TLS                │ gRPC/TLS
+              │ gRPC/TLS                │ gRPC/TLS (control + relay)
               ▼                         ▼
 ┌──────────── Device (blinex-agent) ──────────────────────────────────┐
 │                                                                       │
-│  wireguard-go userspace TUN (blinex0)                                │
-│  └── IceBind  routes WireGuard packets through ICE net.Conn          │
-│  pion/ice  per-peer NAT traversal agents                              │
+│  wireguard-go userspace device  (kernel TUN blinex0, or netstack)    │
+│  └── RelayBind  →  per-peer data path, one of:                        │
+│        • relay   WireGuard packets tunnelled through the signal       │
+│                  server's gRPC stream (always available)              │
+│        • direct  ICE-negotiated peer-to-peer UDP, used after a probe  │
+│                  confirms it works; auto-falls back to relay          │
 │  Magic DNS  127.0.0.1:53535  →  hostname.blinex                        │
 │  Subnet / exit node routing  (netlink + iptables MASQUERADE)         │
+│  Local control socket  →  `blinex-agent status | peers | routes`     │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
 ```
+
+### How peers connect
+
+1. The agent enrolls with the **management server** (setup key → JWT + a stable
+   `100.64.x.x` IP), then opens a long-lived gRPC **sync** stream for live peer,
+   tag, route, and ACL updates.
+2. For every other peer it opens a bidirectional **signal** stream. WireGuard
+   packets are relayed peer-to-peer *through the signal server* (DERP-style) —
+   this works behind any NAT with no port forwarding and is the always-on
+   default. All traffic stays end-to-end encrypted by WireGuard; the control
+   plane only ever sees ciphertext.
+3. In parallel, the agent runs **ICE** (STUN + the TURN relay) to try for a
+   **direct** peer-to-peer path. A tiny probe runs over the candidate ICE
+   connection; only once the probe confirms the path actually passes traffic
+   does the agent switch that peer's send path from relay to direct. If the
+   direct path later degrades, it transparently reverts to relay.
+4. On kernel-TUN devices the agent installs a `100.64.0.0/10` route so mesh
+   traffic reaches the WireGuard interface, and uses `netlink` + iptables for
+   subnet routing / exit-node MASQUERADE. In netstack mode (no `/dev/net/tun`,
+   e.g. unprivileged LXC) it serves inbound traffic in userspace.
+
+> **Control-plane TLS:** management and signal use a self-signed cert by default,
+> **persisted** to a volume (`TLS_STATE_DIR`) so the TOFU fingerprint pinned by
+> agents stays stable across restarts. Provide `TLS_CERT_FILE` + `TLS_KEY_FILE`
+> for a real certificate.
 
 ---
 
@@ -69,37 +99,48 @@ graph TB
 
     subgraph server["Your Server  (public IP — open these ports inbound)"]
         Mgmt["Management\nTCP :50051  gRPC/TLS\nTCP :8080   HTTPS API"]
-        Sig["Signal\nTCP :10000  gRPC/TLS"]
-        Relay["Relay\nUDP :3478   STUN/TURN"]
+        Sig["Signal\nTCP :10000  gRPC/TLS\n(signaling + WG relay)"]
+        Relay["Relay\nUDP :3478   STUN/TURN\n(direct-path assist)"]
         Dash["Dashboard\nTCP :3000"]
     end
 
     A -- "TCP :50051  enroll + sync" --> Mgmt
-    A -- "TCP :10000  ICE signaling" --> Sig
-    A -. "UDP :3478  relay fallback\n(only if hole-punch fails)" .-> Relay
+    A == "TCP :10000  WireGuard relay (default)" ==> Sig
+    A -. "UDP :3478  STUN/TURN\n(for direct-path attempt)" .-> Relay
 
     B -- "TCP :50051  enroll + sync" --> Mgmt
-    B -- "TCP :10000  ICE signaling" --> Sig
-    B -. "UDP :3478  relay fallback\n(only if hole-punch fails)" .-> Relay
+    B == "TCP :10000  WireGuard relay (default)" ==> Sig
+    B -. "UDP :3478  STUN/TURN\n(for direct-path attempt)" .-> Relay
 
-    A <-- "WireGuard P2P  UDP ephemeral\n(hole-punched, no server port)" --> B
+    A <-. "WireGuard P2P  UDP ephemeral\n(direct upgrade when reachable)" .-> B
 
     Browser -- "TCP :8080 / :3000" --> Dash
 ```
+
+> **Data path:** by default every peer's WireGuard traffic is relayed through the
+> signal server on **:10000** (works behind any NAT, no inbound ports on agents).
+> The agent simultaneously attempts a **direct** peer-to-peer path via ICE/STUN/
+> TURN (**:3478**) and upgrades to it automatically when a probe confirms it
+> works — otherwise it stays on the relay.
 
 ### Port reference
 
 | Port | Protocol | Who connects | Required? | Purpose |
 |------|----------|-------------|-----------|---------|
 | **50051** | TCP | Agents | **Yes** | Management gRPC/TLS — enrollment, config sync, push updates |
-| **10000** | TCP | Agents | **Yes** | Signal gRPC/TLS — ICE candidate exchange for NAT traversal |
-| **3478** | UDP | Agents | Recommended | STUN/TURN relay — fallback when direct hole-punch fails (symmetric NAT) |
+| **10000** | TCP | Agents | **Yes** | Signal gRPC/TLS — ICE signaling **and** the default WireGuard relay path |
+| **3478** | UDP | Agents | Recommended | STUN/TURN — used to negotiate/relay a direct peer-to-peer path |
 | **8080** | TCP | Browsers / agents | For dashboard | HTTPS REST API — also serves the dashboard if not separately proxied |
 | **3000** | TCP | Browsers | Optional | Next.js dashboard (can be hidden behind a reverse proxy on :443) |
 
+> The relay's direct-path data ports also need to be reachable for TURN to relay
+> a direct connection: open **UDP 49152–49252** inbound as well (configurable via
+> `RELAY_MIN_PORT` / `RELAY_MAX_PORT`). Without them, peers simply stay on the
+> :10000 relay path.
+
 ### What you do NOT need to open
 
-- **No inbound ports on agent devices.** Agents only make outbound TCP connections to the server. WireGuard P2P traffic uses ephemeral UDP ports negotiated by ICE hole-punching — both sides connect outward and the packets meet in the middle.
+- **No inbound ports on agent devices.** Agents only make outbound connections. The default WireGuard path is relayed through the signal server; a direct peer-to-peer path is negotiated outward via ICE when both sides are reachable.
 - **No WireGuard UDP port on the server.** The server is not a WireGuard peer; it is a control plane only.
 
 ### Production recommendation
