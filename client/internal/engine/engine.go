@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	commonv1 "github.com/blinex/gen/common/v1"
@@ -21,6 +22,7 @@ import (
 	"github.com/blinex/client/internal/dns"
 	"github.com/blinex/client/internal/ice"
 	"github.com/blinex/client/internal/mgmclient"
+	"github.com/blinex/client/internal/peerlink"
 	"github.com/blinex/client/internal/relay"
 	"github.com/blinex/client/internal/peer"
 	"github.com/blinex/client/internal/routing"
@@ -47,10 +49,12 @@ type Engine struct {
 	dns           *dns.Resolver
 	peers         *peer.Manager
 	forwarder     *wgmgr.Forwarder
-	relayConns    map[string]*relay.Conn      // peerKey → relay connection (for sending)
+	relayConns    map[string]*relay.Conn     // peerKey → relay connection (for sending)
 	relayEndpts   map[string]netip.AddrPort  // peerKey → virtual endpoint address
-	appliedRoutes map[string][]string   // peerKey → route CIDRs currently installed in OS
-	exitNode      *exitNodeState        // non-nil when exit node routing is active
+	mu            sync.Mutex
+	links         map[string]*peerlink.Link // peerKey → data path link (relay + ICE)
+	appliedRoutes map[string][]string       // peerKey → route CIDRs currently installed in OS
+	exitNode      *exitNodeState            // non-nil when exit node routing is active
 	ctx           context.Context
 }
 
@@ -97,6 +101,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		peers:         peer.New(),
 		relayConns:    make(map[string]*relay.Conn),
 		relayEndpts:   make(map[string]netip.AddrPort),
+		links:         make(map[string]*peerlink.Link),
 		appliedRoutes: make(map[string][]string),
 	}, nil
 }
@@ -108,10 +113,15 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer e.mgm.Close()
 	defer e.sig.Close()
 
-	// Wire ICE → WireGuard: once ICE establishes a conn, update the endpoint.
+	// Wire ICE → peerLink: when ICE establishes a direct conn, hand it to the
+	// peer's link, which probes it and switches the send path only if healthy.
+	// The relay remains the always-available default and fallback.
 	e.ice.OnConnected = func(peerKey, endpoint string, conn net.Conn) {
-		if err := e.wg.UpdateEndpoint(peerKey, endpoint, conn); err != nil {
-			log.Error().Err(err).Str("peer", shortKey(peerKey)).Msg("endpoint update failed")
+		e.mu.Lock()
+		link := e.links[peerKey]
+		e.mu.Unlock()
+		if link != nil {
+			link.SetICEConn(conn)
 		}
 	}
 
@@ -267,25 +277,31 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		}
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 
-		// Create relay connection via signal server (DERP-style).
-		// Sending: WireGuard → IceBind.Send → relay.Conn.Write → signal server
-		// Receiving: signal server → InjectRecv → IceBind.recvCh → WireGuard
+		// Data path: a peerLink wraps the relay conn (always-on default) and,
+		// once ICE connects and probes succeed, a direct ICE conn.
+		//   Send:    WireGuard → RelayBind.Send → peerLink.Write → relay|ICE
+		//   Receive: signal relay → ReceiveFromRelay → bind, and
+		//            ICE conn → peerLink read loop → ReceiveFromRelay → bind
 		rc := relay.New(e.wg.PublicKey(), p.WgPubKey, e.sig)
 		e.relayConns[p.WgPubKey] = rc
 		endpoint := rc.Endpoint()
 		ep, _ := netip.ParseAddrPort(endpoint)
 		e.relayEndpts[p.WgPubKey] = ep
 
-		// Register relay conn for sending and tell WireGuard about the endpoint.
-		if err := e.wg.UpdateEndpoint(p.WgPubKey, endpoint, rc); err != nil {
+		link := peerlink.New(ep, p.WgPubKey, rc, e.wg.Bind().ReceiveFromRelay)
+		e.mu.Lock()
+		e.links[p.WgPubKey] = link
+		e.mu.Unlock()
+
+		// Register the link as the send conn and set the WireGuard endpoint.
+		if err := e.wg.UpdateEndpoint(p.WgPubKey, endpoint, link); err != nil {
 			log.Error().Err(err).Str("peer", shortKey(p.WgPubKey)).Msg("relay endpoint setup failed")
 		} else {
-			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Str("endpoint", endpoint).Msg("peer added, relay connected via signal")
+			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Msg("peer added, relay connected via signal")
 		}
 
-		// ICE disabled — relay via signal server is the primary data path.
-		// Direct connections can be added later as an optimization.
-		// e.ice.StartConnect(e.ctx, p.WgPubKey)
+		// Start ICE to try for a direct path; peerLink upgrades only if healthy.
+		e.ice.StartConnect(e.ctx, p.WgPubKey)
 	}
 
 	for _, p := range updated {
@@ -314,6 +330,13 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		delete(e.appliedRoutes, p.WgPubKey)
 		e.dns.Remove(p.DnsLabel)
 		e.ice.ClosePeer(p.WgPubKey)
+		e.mu.Lock()
+		if link, ok := e.links[p.WgPubKey]; ok {
+			link.Close()
+			delete(e.links, p.WgPubKey)
+		}
+		e.mu.Unlock()
+		delete(e.relayEndpts, p.WgPubKey)
 		if rc, ok := e.relayConns[p.WgPubKey]; ok {
 			rc.Close()
 			delete(e.relayConns, p.WgPubKey)

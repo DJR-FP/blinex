@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"net"
 	"net/netip"
 	"strings"
 
@@ -168,10 +167,9 @@ func (m *Manager) SetPeerEndpoint(pubKeyB64 string, endpoint string) error {
 	return m.dev.IpcSet(fmt.Sprintf("public_key=%s\nendpoint=%s\n", pubHex, endpoint))
 }
 
-// UpdateEndpoint sets/updates the endpoint of an existing peer and registers
-// the relay net.Conn with the bind layer.
-func (m *Manager) UpdateEndpoint(pubKeyB64 string, endpoint string, relayConn net.Conn) error {
-	if err := m.bind.SetEndpoint(endpoint, relayConn); err != nil {
+// UpdateEndpoint registers the send path for a peer and sets its WireGuard endpoint.
+func (m *Manager) UpdateEndpoint(pubKeyB64 string, endpoint string, sendPath PacketWriter) error {
+	if err := m.bind.SetEndpoint(endpoint, sendPath); err != nil {
 		return err
 	}
 	return m.SetPeerEndpoint(pubKeyB64, endpoint)

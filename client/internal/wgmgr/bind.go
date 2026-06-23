@@ -9,13 +9,19 @@ import (
 	"golang.zx2c4.com/wireguard/conn"
 )
 
+// PacketWriter is the minimal interface the bind needs to send a peer's
+// outbound WireGuard packets (satisfied by relay.Conn and peerlink.Link).
+type PacketWriter interface {
+	Write([]byte) (int, error)
+}
+
 // RelayBind implements conn.Bind with relay support, following Netbird's pattern.
 // It uses a dedicated channel for relay packets and returns a separate ReceiveFunc
 // for relay data, which wireguard-go runs in its own goroutine.
 type RelayBind struct {
 	mu        sync.RWMutex
-	endpoints map[netip.AddrPort]net.Conn // fake endpoint → relay conn (for sending)
-	relayCh   chan relayPacket            // relay receive channel
+	endpoints map[netip.AddrPort]PacketWriter // fake endpoint → send path
+	relayCh   chan relayPacket                // relay receive channel
 	doneCh    chan struct{}
 	once      sync.Once
 }
@@ -27,14 +33,14 @@ type relayPacket struct {
 
 func NewRelayBind() *RelayBind {
 	return &RelayBind{
-		endpoints: make(map[netip.AddrPort]net.Conn),
+		endpoints: make(map[netip.AddrPort]PacketWriter),
 		relayCh:   make(chan relayPacket, 512),
 		doneCh:    make(chan struct{}),
 	}
 }
 
-// SetEndpoint registers a relay conn for a fake endpoint address (for sending).
-func (b *RelayBind) SetEndpoint(endpointStr string, c net.Conn) error {
+// SetEndpoint registers a send path for a fake endpoint address.
+func (b *RelayBind) SetEndpoint(endpointStr string, c PacketWriter) error {
 	ap, err := netip.ParseAddrPort(endpointStr)
 	if err != nil {
 		return fmt.Errorf("parsing endpoint %q: %w", endpointStr, err)
