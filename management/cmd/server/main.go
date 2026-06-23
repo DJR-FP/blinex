@@ -72,7 +72,7 @@ func main() {
 	}
 
 	grpcSrv := grpcserver.New(st, authMgr, ipam, cfg.NetworkCIDR, cfg.DNSSuffix)
-	httpSrv := httpserver.New(st, authMgr, grpcSrv.NotifyAccount, version, cfg.AdminUser, cfg.AdminPassword)
+	httpSrv := httpserver.New(st, authMgr, grpcSrv.NotifyAccount, grpcSrv.ConnectedKeys, version, cfg.AdminUser, cfg.AdminPassword)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {

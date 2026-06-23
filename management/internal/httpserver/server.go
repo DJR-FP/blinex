@@ -26,12 +26,13 @@ type Server struct {
 	auth          *auth.Manager
 	router        *gin.Engine
 	notify        func(accountID string) // triggers gRPC sync push to all account peers
+	connected     func() map[string]bool // WG pubkeys with an active sync stream
 	version       string
 	adminUser     string
 	adminPassword string
 }
 
-func New(st store.Store, authMgr *auth.Manager, notify func(string), version, adminUser, adminPassword string) *Server {
+func New(st store.Store, authMgr *auth.Manager, notify func(string), connected func() map[string]bool, version, adminUser, adminPassword string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -46,7 +47,7 @@ func New(st store.Store, authMgr *auth.Manager, notify func(string), version, ad
 		MaxAge:           12 * time.Hour,
 	}))
 
-	s := &Server{store: st, auth: authMgr, router: r, notify: notify, version: version, adminUser: adminUser, adminPassword: adminPassword}
+	s := &Server{store: st, auth: authMgr, router: r, notify: notify, connected: connected, version: version, adminUser: adminUser, adminPassword: adminPassword}
 	s.registerRoutes()
 	return s
 }
@@ -108,6 +109,14 @@ func (s *Server) listPeers(c *gin.Context) {
 		log.Error().Err(err).Msg("listPeers")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
+	}
+	// Mark peers with an active sync stream as connected (live, not stored).
+	var conn map[string]bool
+	if s.connected != nil {
+		conn = s.connected()
+	}
+	for _, p := range peers {
+		p.Connected = conn[p.WGPubKey]
 	}
 	c.JSON(http.StatusOK, gin.H{"peers": peers})
 }

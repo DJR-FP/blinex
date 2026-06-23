@@ -152,7 +152,14 @@ func (s *Server) Sync(req *managementv1.SyncRequest, stream managementv1.Managem
 
 	sub := &syncSub{peerKey: req.WgPubKey, accountID: peer.AccountID, ch: make(chan struct{}, 1)}
 	s.registerSub(req.WgPubKey, sub)
-	defer s.unregisterSub(req.WgPubKey)
+	s.touchLastSeen(stream.Context(), peer)
+	defer func() {
+		s.unregisterSub(req.WgPubKey)
+		// Record the disconnect time so the dashboard can show "last seen".
+		s.touchLastSeen(context.Background(), peer)
+		// Notify other peers so the dashboard refreshes connection state.
+		s.notifyAll(peer.AccountID)
+	}()
 
 	// Send the current state immediately, then stream updates.
 	send := func() error {
@@ -327,6 +334,28 @@ func (s *Server) notifyAll(accountID string) {
 		default:
 		}
 	}
+}
+
+// touchLastSeen updates a peer's LastSeen timestamp to now (best-effort).
+func (s *Server) touchLastSeen(ctx context.Context, peer *domain.Peer) {
+	fresh, err := s.store.GetPeer(ctx, peer.WGPubKey)
+	if err != nil {
+		return
+	}
+	fresh.LastSeen = time.Now()
+	_ = s.store.SavePeer(ctx, fresh)
+}
+
+// ConnectedKeys returns the set of WireGuard public keys with an active Sync
+// stream — i.e. the peers currently connected to the control plane.
+func (s *Server) ConnectedKeys() map[string]bool {
+	s.subsMu.RLock()
+	defer s.subsMu.RUnlock()
+	out := make(map[string]bool, len(s.subs))
+	for key := range s.subs {
+		out[key] = true
+	}
+	return out
 }
 
 func (s *Server) registerSub(key string, sub *syncSub) {
