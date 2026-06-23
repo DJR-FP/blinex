@@ -270,6 +270,9 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 		Bool("controller", isController).
 		Msg("ICE: gathering complete, starting signaling")
 
+	// parentCtx outlives the connect attempt; we hold the agent open on it
+	// after a successful connection so the direct conn isn't torn down.
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, iceTimeout)
 	defer cancel()
 
@@ -370,6 +373,11 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 	if m.OnConnected != nil {
 		m.OnConnected(peerKey, endpoint, conn)
 	}
+
+	// Hold the agent (and the established conn) open until the peer is removed
+	// or the engine shuts down. Returning here would trigger the deferred
+	// agent.Close() and kill the direct path, causing reconnect churn.
+	<-parentCtx.Done()
 }
 
 func parseSTUNURLs(hosts []string) []*stun.URI {
