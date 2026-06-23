@@ -64,10 +64,12 @@ func (b *IceBind) RemoveConn(endpointStr string) {
 }
 
 func (b *IceBind) receiveLoop(src netip.AddrPort, c net.Conn) {
+	log.Debug().Str("src", src.String()).Msg("bind: receiveLoop started")
 	buf := make([]byte, 1<<16)
 	for {
 		n, err := c.Read(buf)
 		if err != nil {
+			log.Warn().Err(err).Str("src", src.String()).Msg("bind: receiveLoop exiting")
 			return
 		}
 		pkt := make([]byte, n)

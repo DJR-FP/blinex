@@ -46,7 +46,14 @@ func New(selfKey, peerKey string, signal Sender) *Conn {
 // Deliver enqueues an incoming packet from the signal server.
 func (c *Conn) Deliver(data []byte) {
 	select {
+	case <-c.closed:
+		log.Warn().Str("peer", c.peerKey[:min(8, len(c.peerKey))]).Msg("relay: Deliver on closed conn")
+		return
+	default:
+	}
+	select {
 	case c.recvCh <- data:
+		log.Debug().Int("bytes", len(data)).Int("queued", len(c.recvCh)).Str("peer", c.peerKey[:min(8, len(c.peerKey))]).Msg("relay: delivered to recvCh")
 	default:
 		log.Warn().Str("peer", c.peerKey[:min(8, len(c.peerKey))]).Msg("relay: recv buffer full, dropping packet")
 	}
