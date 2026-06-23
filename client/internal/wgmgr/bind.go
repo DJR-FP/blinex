@@ -76,20 +76,18 @@ func (b *RelayBind) receiveRelayed(bufs [][]byte, sizes []int, eps []conn.Endpoi
 // ── conn.Bind interface ───────────────────────────────────────────────────────
 
 func (b *RelayBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
-	log.Info().Msg("bind: Open called — relay receive goroutine will start")
+	// Reset doneCh so receiveRelayed works after a Close/Open cycle
+	// (wireguard-go calls Close during init, then Open on device.Up).
+	b.doneCh = make(chan struct{})
+	b.once = sync.Once{}
+	log.Info().Msg("bind: Open called")
 	return []conn.ReceiveFunc{b.receiveRelayed}, 0, nil
 }
 
 func (b *RelayBind) Close() error {
 	b.once.Do(func() {
 		close(b.doneCh)
-		log.Info().Msg("bind: closed")
 	})
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, c := range b.endpoints {
-		c.Close()
-	}
 	return nil
 }
 
