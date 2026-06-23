@@ -51,9 +51,11 @@ func (b *RelayBind) SetEndpoint(endpointStr string, c net.Conn) error {
 func (b *RelayBind) ReceiveFromRelay(data []byte, src netip.AddrPort) {
 	pkt := make([]byte, len(data))
 	copy(pkt, data)
+	log.Debug().Int("bytes", len(data)).Str("src", src.String()).Int("queued", len(b.relayCh)).Msg("bind: ReceiveFromRelay called")
 	select {
 	case b.relayCh <- relayPacket{data: pkt, src: src}:
 	case <-b.doneCh:
+		log.Warn().Msg("bind: ReceiveFromRelay — bind is closed")
 	}
 }
 

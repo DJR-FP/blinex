@@ -166,12 +166,17 @@ func (e *Engine) Run(ctx context.Context) error {
 				if ep, ok := e.relayEndpts[msg.Key]; ok {
 					e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
 				} else {
-					for _, ep := range e.relayEndpts {
+					log.Debug().Str("sender", shortKey(msg.Key)).Int("known", len(e.relayEndpts)).Msg("relay: key miss, trying fallback")
+					for k, ep := range e.relayEndpts {
+						log.Debug().Str("known_key", shortKey(k)).Str("sender", shortKey(msg.Key)).Msg("relay: comparing keys")
 						e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
 						break
 					}
 				}
 				return
+			}
+			if msg.Body != nil {
+				log.Debug().Int32("type", int32(msg.Body.Type)).Str("from", shortKey(msg.Key)).Msg("signal: non-relay message")
 			}
 			e.ice.HandleSignal(msg)
 		})
