@@ -35,6 +35,12 @@ type Server struct {
 func New(st store.Store, authMgr *auth.Manager, notify func(string), connected func() map[string]bool, version, adminUser, adminPassword string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// WireGuard public keys are base64 and contain '/', '+', '='. The dashboard
+	// URL-encodes them in path params (e.g. DELETE /peers/<key>); matching on the
+	// raw path keeps '%2F' from being treated as a path separator, which would
+	// otherwise 404 any peer whose key contains a slash.
+	r.UseRawPath = true
+	r.UnescapePathValues = true
 	r.Use(gin.Recovery())
 
 	allowedOrigins := parseOrigins(os.Getenv("MGMT_ALLOWED_ORIGINS"))
