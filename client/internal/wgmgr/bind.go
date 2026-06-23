@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"golang.zx2c4.com/wireguard/conn"
+	"github.com/rs/zerolog/log"
 )
 
 // IceBind implements conn.Bind. Each peer gets its own net.Conn (ICE connection);
@@ -90,9 +91,7 @@ func (b *IceBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
 			n := copy(bufs[0], pkt.data)
 			sizes[0] = n
 			eps[0] = &IceEndpoint{addrPort: pkt.src}
-			if n > 0 {
-				fmt.Printf("[bind] recv %d bytes from %s (type=%d)\n", n, pkt.src, bufs[0][0])
-			}
+			log.Debug().Int("bytes", n).Str("from", pkt.src.String()).Int("type", int(bufs[0][0])).Msg("bind: recv → WireGuard")
 			return 1, nil
 		}
 	}
@@ -120,9 +119,11 @@ func (b *IceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	c, found := b.conns[ice.addrPort]
 	b.mu.RUnlock()
 	if !found {
+		log.Warn().Str("endpoint", ice.addrPort.String()).Int("conns", len(b.conns)).Msg("bind: Send failed — no conn")
 		return fmt.Errorf("no conn for endpoint %s (have %d conns)", ice.addrPort, len(b.conns))
 	}
 	for _, buf := range bufs {
+		log.Debug().Int("bytes", len(buf)).Str("to", ice.addrPort.String()).Int("type", int(buf[0])).Msg("bind: Send from WireGuard")
 		if _, err := c.Write(buf); err != nil {
 			return err
 		}
