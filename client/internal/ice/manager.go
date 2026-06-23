@@ -2,6 +2,7 @@ package ice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -16,16 +17,12 @@ import (
 
 const iceTimeout = 90 * time.Second
 
-// Sender is the subset of signalclient.Client needed by the ICE manager.
 type Sender interface {
 	Send(remoteKey string, body *signalv1.Body) error
 }
 
-// ConnectCallback is called once ICE is established for a peer.
-// endpoint is the ICE-established remote address and conn is the live net.Conn.
 type ConnectCallback func(peerKey, endpoint string, conn net.Conn)
 
-// Manager handles ICE NAT traversal for all peers.
 type Manager struct {
 	selfKey  string
 	stunURLs []*stun.URI
@@ -40,23 +37,26 @@ type Manager struct {
 }
 
 type peerConn struct {
-	agent       *pion.Agent
-	offerCh     chan Offer
-	answerCh    chan Answer
-	candidateCh chan string
-	cancel      context.CancelFunc
+	offerCh  chan iceExchange
+	answerCh chan iceExchange
+	cancel   context.CancelFunc
+}
+
+// iceExchange bundles credentials + all candidates in one message.
+type iceExchange struct {
+	Ufrag      string   `json:"ufrag"`
+	Pwd        string   `json:"pwd"`
+	Candidates []string `json:"candidates"`
 }
 
 func newPeerConn(cancel context.CancelFunc) *peerConn {
 	return &peerConn{
-		offerCh:     make(chan Offer, 1),
-		answerCh:    make(chan Answer, 1),
-		candidateCh: make(chan string, 64),
-		cancel:      cancel,
+		offerCh:  make(chan iceExchange, 1),
+		answerCh: make(chan iceExchange, 1),
+		cancel:   cancel,
 	}
 }
 
-// New creates an ICE Manager. stunHosts are full URIs like "stun:host:port" or "turn:host:port".
 func New(selfKey string, stunHosts []string, turnUser, turnPass string, signal Sender) *Manager {
 	urls := parseSTUNURLs(stunHosts)
 	for _, u := range urls {
@@ -75,7 +75,6 @@ func New(selfKey string, stunHosts []string, turnUser, turnPass string, signal S
 	}
 }
 
-// StartConnect initiates ICE towards peerKey (idempotent while running).
 func (m *Manager) StartConnect(ctx context.Context, peerKey string) {
 	m.mu.Lock()
 	if _, exists := m.peers[peerKey]; exists {
@@ -88,6 +87,62 @@ func (m *Manager) StartConnect(ctx context.Context, peerKey string) {
 	m.mu.Unlock()
 
 	go m.runPeerWithRetry(pCtx, peerKey)
+}
+
+func (m *Manager) ClosePeer(peerKey string) {
+	m.mu.Lock()
+	pc, ok := m.peers[peerKey]
+	delete(m.peers, peerKey)
+	m.mu.Unlock()
+	if ok {
+		pc.cancel()
+	}
+}
+
+func (m *Manager) HandleSignal(msg *signalv1.Message) {
+	if msg.Body == nil {
+		return
+	}
+	peerKey := msg.Key
+
+	switch msg.Body.Type {
+	case signalv1.Body_OFFER:
+		var ex iceExchange
+		if err := json.Unmarshal([]byte(msg.Body.Payload), &ex); err != nil {
+			log.Warn().Err(err).Msg("ICE: bad offer payload")
+			return
+		}
+		m.mu.Lock()
+		pc, exists := m.peers[peerKey]
+		if !exists {
+			pCtx, cancel := context.WithCancel(context.Background())
+			pc = newPeerConn(cancel)
+			m.peers[peerKey] = pc
+			m.mu.Unlock()
+			go m.runPeerWithRetry(pCtx, peerKey)
+		} else {
+			m.mu.Unlock()
+		}
+		select {
+		case pc.offerCh <- ex:
+		default:
+		}
+
+	case signalv1.Body_ANSWER:
+		var ex iceExchange
+		if err := json.Unmarshal([]byte(msg.Body.Payload), &ex); err != nil {
+			return
+		}
+		m.mu.RLock()
+		pc, ok := m.peers[peerKey]
+		m.mu.RUnlock()
+		if ok {
+			select {
+			case pc.answerCh <- ex:
+			default:
+			}
+		}
+	}
 }
 
 func (m *Manager) runPeerWithRetry(ctx context.Context, peerKey string) {
@@ -118,9 +173,6 @@ func (m *Manager) runPeerWithRetry(ctx context.Context, peerKey string) {
 			return
 		}
 
-		// Create the new peerConn BEFORE the backoff wait so that
-		// incoming signal messages (offers, answers, candidates)
-		// during the wait are buffered in the new channels.
 		m.mu.Lock()
 		newPC := newPeerConn(pc.cancel)
 		m.peers[peerKey] = newPC
@@ -138,90 +190,11 @@ func (m *Manager) runPeerWithRetry(ctx context.Context, peerKey string) {
 	}
 }
 
-// ClosePeer tears down ICE for a specific peer.
-func (m *Manager) ClosePeer(peerKey string) {
-	m.mu.Lock()
-	pc, ok := m.peers[peerKey]
-	delete(m.peers, peerKey)
-	m.mu.Unlock()
-	if ok {
-		pc.cancel()
-		if pc.agent != nil {
-			_ = pc.agent.Close()
-		}
-	}
-}
-
-// HandleSignal dispatches an incoming signal message to the correct peer.
-func (m *Manager) HandleSignal(msg *signalv1.Message) {
-	if msg.Body == nil {
-		return
-	}
-	peerKey := msg.Key
-
-	switch msg.Body.Type {
-	case signalv1.Body_OFFER:
-		offer, err := unmarshalOffer(msg.Body.Payload)
-		if err != nil {
-			log.Warn().Err(err).Msg("ICE: bad offer payload")
-			return
-		}
-		// Responder side: create peerConn if not already started.
-		m.mu.Lock()
-		pc, exists := m.peers[peerKey]
-		if !exists {
-			pCtx, cancel := context.WithCancel(context.Background())
-			pc = newPeerConn(cancel)
-			m.peers[peerKey] = pc
-			m.mu.Unlock()
-			go m.runPeer(pCtx, peerKey, pc)
-		} else {
-			m.mu.Unlock()
-		}
-		select {
-		case pc.offerCh <- offer:
-		default:
-		}
-
-	case signalv1.Body_ANSWER:
-		answer, err := unmarshalAnswer(msg.Body.Payload)
-		if err != nil {
-			return
-		}
-		m.mu.RLock()
-		pc, ok := m.peers[peerKey]
-		m.mu.RUnlock()
-		if ok {
-			select {
-			case pc.answerCh <- answer:
-			default:
-			}
-		}
-
-	case signalv1.Body_CANDIDATE:
-		cand, err := unmarshalCandidate(msg.Body.Payload)
-		if err != nil {
-			return
-		}
-		m.mu.RLock()
-		pc, ok := m.peers[peerKey]
-		m.mu.RUnlock()
-		if ok {
-			select {
-			case pc.candidateCh <- cand.Candidate:
-			default:
-			}
-		}
-	}
-}
-
-// runPeer runs the full ICE lifecycle for one peer.
 func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
-	// Lexicographically smaller key = controller.
 	isController := m.selfKey < peerKey
 
 	logFactory := logging.NewDefaultLoggerFactory()
-	logFactory.DefaultLogLevel = logging.LogLevelDebug
+	logFactory.DefaultLogLevel = logging.LogLevelInfo
 
 	agent, err := pion.NewAgent(&pion.AgentConfig{
 		NetworkTypes:        []pion.NetworkType{pion.NetworkTypeUDP4},
@@ -229,17 +202,16 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 		LoggerFactory:       logFactory,
 		DisconnectedTimeout: durationPtr(iceTimeout),
 		FailedTimeout:       durationPtr(iceTimeout),
-		CheckInterval:       durationPtr(500 * time.Millisecond),
+		CheckInterval:       durationPtr(200 * time.Millisecond),
 	})
 	if err != nil {
 		log.Error().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: agent create failed")
 		return
 	}
-	pc.agent = agent
 	defer agent.Close()
 
 	if err := agent.OnConnectionStateChange(func(state pion.ConnectionState) {
-		log.Info().Str("peer", shortKey(peerKey)).Str("state", state.String()).Msg("ICE: connection state changed")
+		log.Info().Str("peer", shortKey(peerKey)).Str("state", state.String()).Msg("ICE: state")
 	}); err != nil {
 		return
 	}
@@ -249,24 +221,25 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 			Str("peer", shortKey(peerKey)).
 			Str("local", fmt.Sprintf("%s %s:%d", local.Type(), local.Address(), local.Port())).
 			Str("remote", fmt.Sprintf("%s %s:%d", remote.Type(), remote.Address(), remote.Port())).
-			Msg("ICE: selected candidate pair")
+			Msg("ICE: selected pair")
 	}); err != nil {
 		return
 	}
 
+	// Gather ALL candidates before signaling (vanilla ICE, not trickle).
+	var localCandidates []string
+	gatherDone := make(chan struct{})
 	if err := agent.OnCandidate(func(c pion.Candidate) {
 		if c == nil {
+			close(gatherDone)
 			return
 		}
+		localCandidates = append(localCandidates, c.Marshal())
 		log.Debug().
 			Str("peer", shortKey(peerKey)).
 			Str("type", c.Type().String()).
-			Str("addr", c.Address()+":"+fmt.Sprintf("%d", c.Port())).
-			Msg("ICE: local candidate gathered")
-		m.signal.Send(peerKey, &signalv1.Body{ //nolint:errcheck
-			Type:    signalv1.Body_CANDIDATE,
-			Payload: marshalCandidate(Candidate{Candidate: c.Marshal()}),
-		})
+			Str("addr", fmt.Sprintf("%s:%d", c.Address(), c.Port())).
+			Msg("ICE: gathered")
 	}); err != nil {
 		return
 	}
@@ -276,66 +249,108 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 		return
 	}
 
+	// Wait for gathering to complete (includes relay candidates).
+	select {
+	case <-ctx.Done():
+		return
+	case <-gatherDone:
+	case <-time.After(10 * time.Second):
+		log.Warn().Str("peer", shortKey(peerKey)).Msg("ICE: gather timeout, proceeding with available candidates")
+	}
+
 	localUfrag, localPwd, err := agent.GetLocalUserCredentials()
 	if err != nil {
 		return
 	}
 
+	log.Info().
+		Str("peer", shortKey(peerKey)).
+		Int("candidates", len(localCandidates)).
+		Bool("controller", isController).
+		Msg("ICE: gathering complete, starting signaling")
+
 	ctx, cancel := context.WithTimeout(ctx, iceTimeout)
 	defer cancel()
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case raw := <-pc.candidateCh:
-				c, err := pion.UnmarshalCandidate(raw)
-				if err != nil {
-					log.Warn().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: failed to unmarshal remote candidate")
-					continue
-				}
-				log.Debug().
-					Str("peer", shortKey(peerKey)).
-					Str("type", c.Type().String()).
-					Str("addr", c.Address()+":"+fmt.Sprintf("%d", c.Port())).
-					Msg("ICE: remote candidate added")
-				if err := agent.AddRemoteCandidate(c); err != nil {
-					log.Warn().Err(err).Str("peer", shortKey(peerKey)).Msg("ICE: AddRemoteCandidate failed")
-				}
-			}
-		}
-	}()
-
 	var conn net.Conn
+	var remoteUfrag, remotePwd string
+	var remoteCandidates []string
 
 	if isController {
-		m.signal.Send(peerKey, &signalv1.Body{ //nolint:errcheck
-			Type:    signalv1.Body_OFFER,
-			Payload: marshalOffer(Offer{Ufrag: localUfrag, Pwd: localPwd}),
+		// Send OFFER with all candidates.
+		payload, _ := json.Marshal(iceExchange{
+			Ufrag:      localUfrag,
+			Pwd:        localPwd,
+			Candidates: localCandidates,
 		})
-		var remoteUfrag, remotePwd string
+		m.signal.Send(peerKey, &signalv1.Body{
+			Type:    signalv1.Body_OFFER,
+			Payload: string(payload),
+		})
+
+		// Wait for ANSWER with all remote candidates.
 		select {
 		case <-ctx.Done():
 			return
 		case answer := <-pc.answerCh:
-			remoteUfrag, remotePwd = answer.Ufrag, answer.Pwd
+			remoteUfrag = answer.Ufrag
+			remotePwd = answer.Pwd
+			remoteCandidates = answer.Candidates
 		}
-		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: got ANSWER, starting Dial (candidates will trickle)")
-		conn, err = agent.Dial(ctx, remoteUfrag, remotePwd)
+
+		log.Info().
+			Str("peer", shortKey(peerKey)).
+			Int("remote_candidates", len(remoteCandidates)).
+			Msg("ICE: got ANSWER, adding remote candidates")
+
 	} else {
-		var remoteUfrag, remotePwd string
+		// Wait for OFFER with all remote candidates.
 		select {
 		case <-ctx.Done():
 			return
 		case offer := <-pc.offerCh:
-			remoteUfrag, remotePwd = offer.Ufrag, offer.Pwd
-			m.signal.Send(peerKey, &signalv1.Body{ //nolint:errcheck
-				Type:    signalv1.Body_ANSWER,
-				Payload: marshalAnswer(Answer{Ufrag: localUfrag, Pwd: localPwd}),
-			})
+			remoteUfrag = offer.Ufrag
+			remotePwd = offer.Pwd
+			remoteCandidates = offer.Candidates
 		}
-		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: sent ANSWER, starting Accept (candidates will trickle)")
+
+		// Send ANSWER with all candidates.
+		payload, _ := json.Marshal(iceExchange{
+			Ufrag:      localUfrag,
+			Pwd:        localPwd,
+			Candidates: localCandidates,
+		})
+		m.signal.Send(peerKey, &signalv1.Body{
+			Type:    signalv1.Body_ANSWER,
+			Payload: string(payload),
+		})
+
+		log.Info().
+			Str("peer", shortKey(peerKey)).
+			Int("remote_candidates", len(remoteCandidates)).
+			Msg("ICE: got OFFER, sent ANSWER, adding remote candidates")
+	}
+
+	// Add ALL remote candidates before starting Dial/Accept.
+	for _, raw := range remoteCandidates {
+		c, err := pion.UnmarshalCandidate(raw)
+		if err != nil {
+			continue
+		}
+		log.Debug().
+			Str("peer", shortKey(peerKey)).
+			Str("type", c.Type().String()).
+			Str("addr", fmt.Sprintf("%s:%d", c.Address(), c.Port())).
+			Msg("ICE: remote candidate")
+		agent.AddRemoteCandidate(c)
+	}
+
+	// Now start Dial/Accept — all candidates are in place.
+	if isController {
+		log.Info().Str("peer", shortKey(peerKey)).Msg("ICE: starting Dial")
+		conn, err = agent.Dial(ctx, remoteUfrag, remotePwd)
+	} else {
+		log.Info().Str("peer", shortKey(peerKey)).Msg("ICE: starting Accept")
 		conn, err = agent.Accept(ctx, remoteUfrag, remotePwd)
 	}
 
@@ -365,7 +380,7 @@ func parseSTUNURLs(hosts []string) []*stun.URI {
 		}
 	}
 	if len(urls) == 0 {
-		u, _ := stun.ParseURI(fmt.Sprintf("stun:stun.l.google.com:19302"))
+		u, _ := stun.ParseURI("stun:stun.l.google.com:19302")
 		urls = append(urls, u)
 	}
 	return urls
