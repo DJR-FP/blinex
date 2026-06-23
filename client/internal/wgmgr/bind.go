@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"golang.zx2c4.com/wireguard/conn"
-	"github.com/rs/zerolog/log"
 )
 
 // RelayBind implements conn.Bind with relay support, following Netbird's pattern.
@@ -43,7 +42,6 @@ func (b *RelayBind) SetEndpoint(endpointStr string, c net.Conn) error {
 	b.mu.Lock()
 	b.endpoints[ap] = c
 	b.mu.Unlock()
-	log.Debug().Str("endpoint", endpointStr).Msg("bind: registered relay endpoint")
 	return nil
 }
 
@@ -51,11 +49,9 @@ func (b *RelayBind) SetEndpoint(endpointStr string, c net.Conn) error {
 func (b *RelayBind) ReceiveFromRelay(data []byte, src netip.AddrPort) {
 	pkt := make([]byte, len(data))
 	copy(pkt, data)
-	log.Debug().Int("bytes", len(data)).Str("src", src.String()).Int("queued", len(b.relayCh)).Msg("bind: ReceiveFromRelay called")
 	select {
 	case b.relayCh <- relayPacket{data: pkt, src: src}:
 	case <-b.doneCh:
-		log.Warn().Msg("bind: ReceiveFromRelay — bind is closed")
 	}
 }
 
@@ -68,7 +64,6 @@ func (b *RelayBind) receiveRelayed(bufs [][]byte, sizes []int, eps []conn.Endpoi
 		n := copy(bufs[0], pkt.data)
 		sizes[0] = n
 		eps[0] = &RelayEndpoint{addrPort: pkt.src}
-		log.Debug().Int("bytes", n).Str("from", pkt.src.String()).Msg("bind: relay → WireGuard")
 		return 1, nil
 	}
 }
@@ -80,7 +75,6 @@ func (b *RelayBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
 	// (wireguard-go calls Close during init, then Open on device.Up).
 	b.doneCh = make(chan struct{})
 	b.once = sync.Once{}
-	log.Info().Msg("bind: Open called")
 	return []conn.ReceiveFunc{b.receiveRelayed}, 0, nil
 }
 
@@ -105,7 +99,6 @@ func (b *RelayBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 		return fmt.Errorf("no relay conn for %s", rEp.addrPort)
 	}
 	for _, buf := range bufs {
-		log.Debug().Int("bytes", len(buf)).Str("to", rEp.addrPort.String()).Msg("bind: WireGuard → relay")
 		if _, err := c.Write(buf); err != nil {
 			return err
 		}

@@ -1,6 +1,6 @@
 # Bline-X
 
-[![Version](https://img.shields.io/badge/version-v0.7.3-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.9.6-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml)
@@ -11,7 +11,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 
 ## Features
 
-- **Automatic NAT traversal** — ICE hole-punching (STUN) with TURN relay fallback; works across most NATs without port forwarding
+- **Works behind any NAT** — WireGuard traffic is relayed through the signal server (DERP-style), so peers connect without port forwarding or hole-punching. All traffic stays end-to-end encrypted by WireGuard regardless of path
 - **Stable IPs** — every device gets a permanent CGNAT IP (`100.64.x.x`) and a Magic DNS hostname (`device.blinex`)
 - **TLS encrypted control plane** — management and signal servers are TLS by default; self-signed cert generated automatically if none is provided
 - **Exit node / subnet routing** — advertise a LAN subnet or full exit node through any mesh device; toggle per device in the dashboard
@@ -641,10 +641,31 @@ Set `"tls_skip_verify": true` in `/etc/blinex/agent.json` when using self-signed
 
 ### Agent: no known endpoint for peer
 
-ICE negotiation hasn't completed. Verify:
+The peer hasn't established a connection yet. Verify:
 - The other peer is online
 - Signal server is reachable: `nc -zv your-server 10000`
-- STUN/TURN relay is reachable: `nc -zuv your-server 3478`
+
+### Can ping one peer but not another / no ping at all (kernel TUN)
+
+The mesh route is missing. The agent assigns a `/32` address to `blinex0`, which creates no route for the rest of the mesh, so traffic to other peers leaves via the default gateway instead of the tunnel. v0.9.5+ adds the `100.64.0.0/10` route automatically; on older builds add it manually:
+
+```bash
+sudo ip route add 100.64.0.0/10 dev blinex0
+```
+
+### LXC container: agent uses netstack mode, host can't ping out
+
+In an unprivileged LXC, `/dev/net/tun` isn't available, so the agent falls back to userspace netstack. Inbound works (peers can reach it), but the container's own `ping`/apps can't reach the mesh transparently — the same limitation as Tailscale's userspace mode.
+
+**Fix:** pass `/dev/net/tun` into the container so the agent uses kernel mode. On the Proxmox host:
+
+```bash
+echo "lxc.cgroup2.devices.allow: c 10:200 rwm" >> /etc/pve/lxc/<CTID>.conf
+echo "lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file" >> /etc/pve/lxc/<CTID>.conf
+pct restart <CTID>
+```
+
+After restart the agent log shows `WireGuard device ready` (kernel mode) and the container has full bidirectional connectivity.
 
 ### Docker compose fails with "variable is not set"
 

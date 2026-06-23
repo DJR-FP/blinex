@@ -219,4 +219,41 @@ TUN device unavailable — using userspace netstack mode
 
 **Cause:** The kernel TUN device isn't available. Common in LXC/LXD containers and on Windows/macOS.
 
-**Fix:** This is informational, not an error. The agent falls back to userspace networking (netstack), which works without kernel TUN support. Performance may be slightly lower than kernel mode. On Linux VMs, ensure the `tun` kernel module is loaded: `sudo modprobe tun`.
+**What this means:** The agent falls back to userspace networking (netstack), which works without kernel TUN. **However, netstack mode is one-directional for host traffic:**
+
+- **Inbound works** — other peers can reach services on this device, and pings *to* it succeed (the userspace stack auto-replies).
+- **Outbound from host apps does NOT work transparently** — running `ping` or other commands *on* this device uses the host's kernel network stack, which has no knowledge of the userspace tunnel. This is the same limitation as Tailscale's `userspace-networking` mode.
+
+**Fix (recommended): enable kernel TUN.** On Linux VMs, load the module: `sudo modprobe tun`.
+
+**For LXC/LXD containers (e.g. Proxmox):** pass `/dev/net/tun` into the container so the agent uses kernel mode and gets full bidirectional connectivity.
+
+On the **host**, edit the container config (`/etc/pve/lxc/<CTID>.conf` on Proxmox) and add:
+
+```
+lxc.cgroup2.devices.allow: c 10:200 rwm
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+```
+
+Then restart the container and the agent:
+
+```bash
+pct restart <CTID>             # on the Proxmox host
+# inside the container:
+sudo rm -f /var/lib/blinex/state.json
+sudo systemctl restart blinex-agent
+```
+
+After restarting, the log should show `WireGuard device ready` (kernel mode) instead of `using userspace netstack mode`.
+
+### Can ping a peer but it can't ping back (kernel TUN)
+
+**Cause:** The mesh route is missing. The agent assigns a `/32` address to `blinex0`, which creates no route for the rest of the mesh range, so replies leave via the default gateway.
+
+**Fix:** v0.9.5+ adds the `100.64.0.0/10` route automatically. If running an older build, add it manually:
+
+```bash
+sudo ip route add 100.64.0.0/10 dev blinex0
+```
+
+Make it permanent by upgrading to the latest agent.
