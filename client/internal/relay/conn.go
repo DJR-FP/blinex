@@ -58,6 +58,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 		return 0, net.ErrClosed
 	case pkt := <-c.recvCh:
 		n := copy(b, pkt)
+		log.Debug().Int("bytes", n).Str("peer", c.peerKey[:min(8, len(c.peerKey))]).Msg("relay: recv")
 		return n, nil
 	}
 }
@@ -68,6 +69,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 		return 0, net.ErrClosed
 	default:
 	}
+	log.Debug().Int("bytes", len(b)).Str("peer", c.peerKey[:min(8, len(c.peerKey))]).Msg("relay: send")
 	cp := make([]byte, len(b))
 	copy(cp, b)
 	if err := c.signal.Send(c.peerKey, &signalv1.Body{
