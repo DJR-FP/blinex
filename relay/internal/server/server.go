@@ -29,6 +29,8 @@ func Start(cfg Config) error {
 	logFactory := logging.NewDefaultLoggerFactory()
 	logFactory.DefaultLogLevel = logging.LogLevelDebug
 
+	relayIP := net.ParseIP(cfg.PublicIP)
+
 	s, err := turn.NewServer(turn.ServerConfig{
 		Realm: cfg.Realm,
 		AuthHandler: func(username, realm string, srcAddr net.Addr) ([]byte, bool) {
@@ -41,10 +43,14 @@ func Start(cfg Config) error {
 			{
 				PacketConn: udpListener,
 				RelayAddressGenerator: &turn.RelayAddressGeneratorPortRange{
-					RelayAddress: net.ParseIP(cfg.PublicIP),
+					RelayAddress: relayIP,
 					Address:      "0.0.0.0",
 					MinPort:      uint16(cfg.RelayMinPort),
 					MaxPort:      uint16(cfg.RelayMaxPort),
+				},
+				// Allow all peers including the relay's own IP (hairpin).
+				PermissionHandler: func(clientAddr net.Addr, peerIP net.IP) bool {
+					return true
 				},
 			},
 		},
