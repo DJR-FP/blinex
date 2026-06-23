@@ -318,14 +318,7 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 		case answer := <-pc.answerCh:
 			remoteUfrag, remotePwd = answer.Ufrag, answer.Pwd
 		}
-		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: got ANSWER, waiting for candidates")
-		// Wait for trickle candidates to arrive before starting connectivity checks.
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(3 * time.Second):
-		}
-		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: starting Dial")
+		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: got ANSWER, starting Dial (candidates will trickle)")
 		conn, err = agent.Dial(ctx, remoteUfrag, remotePwd)
 	} else {
 		var remoteUfrag, remotePwd string
@@ -339,13 +332,7 @@ func (m *Manager) runPeer(ctx context.Context, peerKey string, pc *peerConn) {
 				Payload: marshalAnswer(Answer{Ufrag: localUfrag, Pwd: localPwd}),
 			})
 		}
-		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: sent ANSWER, waiting for candidates")
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(3 * time.Second):
-		}
-		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: starting Accept")
+		log.Debug().Str("peer", shortKey(peerKey)).Msg("ICE: sent ANSWER, starting Accept (candidates will trickle)")
 		conn, err = agent.Accept(ctx, remoteUfrag, remotePwd)
 	}
 
