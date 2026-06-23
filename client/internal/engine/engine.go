@@ -280,8 +280,9 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Msg("peer added, relay connected via signal")
 		}
 
-		// Also try ICE for a direct connection (upgrades from relay if successful).
-		e.ice.StartConnect(e.ctx, p.WgPubKey)
+		// ICE disabled — relay via signal server is the primary data path.
+		// Direct connections can be added later as an optimization.
+		// e.ice.StartConnect(e.ctx, p.WgPubKey)
 	}
 
 	for _, p := range updated {
