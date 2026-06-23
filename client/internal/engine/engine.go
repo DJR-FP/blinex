@@ -164,17 +164,12 @@ func (e *Engine) Run(ctx context.Context) error {
 		err := e.sig.Connect(ctx, loginResp.Token, func(msg *signalv1.Message) {
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
 				if ep, ok := e.relayEndpts[msg.Key]; ok {
-					e.wg.Bind().InjectRecv(msg.Body.Data, ep)
+					e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
 				} else {
-					// Try all relay endpoints — key format may differ
 					for _, ep := range e.relayEndpts {
-						e.wg.Bind().InjectRecv(msg.Body.Data, ep)
+						e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
 						break
 					}
-					log.Warn().
-						Str("sender", msg.Key[:min(8, len(msg.Key))]).
-						Int("known_peers", len(e.relayEndpts)).
-						Msg("relay: sender key not in relayEndpts, used fallback")
 				}
 				return
 			}
@@ -286,14 +281,8 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		ep, _ := netip.ParseAddrPort(endpoint)
 		e.relayEndpts[p.WgPubKey] = ep
 
-		// Register the relay conn for SENDING only (no receiveLoop).
-		// Receiving is handled by InjectRecv in the signal handler.
-		if err := e.wg.Bind().RegisterConn(endpoint, rc); err != nil {
-			log.Error().Err(err).Msg("relay: RegisterConn failed")
-		}
-
-		// Tell WireGuard about this peer's endpoint.
-		if err := e.wg.SetPeerEndpoint(p.WgPubKey, endpoint); err != nil {
+		// Register relay conn for sending and tell WireGuard about the endpoint.
+		if err := e.wg.UpdateEndpoint(p.WgPubKey, endpoint, rc); err != nil {
 			log.Error().Err(err).Str("peer", shortKey(p.WgPubKey)).Msg("relay endpoint setup failed")
 		} else {
 			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Str("endpoint", endpoint).Msg("peer added, relay connected via signal")

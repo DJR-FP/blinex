@@ -10,144 +10,102 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// IceBind implements conn.Bind. Each peer gets its own net.Conn (ICE connection);
-// WireGuard traffic for that peer is routed through its ICE conn rather than raw UDP.
-type IceBind struct {
-	mu     sync.RWMutex
-	conns  map[netip.AddrPort]net.Conn // endpoint addr → conn
-	recvCh chan recvPacket
-	doneCh chan struct{}
-	once   sync.Once
+// RelayBind implements conn.Bind with relay support, following Netbird's pattern.
+// It uses a dedicated channel for relay packets and returns a separate ReceiveFunc
+// for relay data, which wireguard-go runs in its own goroutine.
+type RelayBind struct {
+	mu        sync.RWMutex
+	endpoints map[netip.AddrPort]net.Conn // fake endpoint → relay conn (for sending)
+	relayCh   chan relayPacket            // relay receive channel
+	doneCh    chan struct{}
+	once      sync.Once
 }
 
-type recvPacket struct {
+type relayPacket struct {
 	data []byte
 	src  netip.AddrPort
 }
 
-func NewIceBind() *IceBind {
-	return &IceBind{
-		conns:  make(map[netip.AddrPort]net.Conn),
-		recvCh: make(chan recvPacket, 512),
-		doneCh: make(chan struct{}),
+func NewRelayBind() *RelayBind {
+	return &RelayBind{
+		endpoints: make(map[netip.AddrPort]net.Conn),
+		relayCh:   make(chan relayPacket, 512),
+		doneCh:    make(chan struct{}),
 	}
 }
 
-// AddConn registers a net.Conn for the given remote endpoint.
-// For relay conns, use InjectRecv instead to bypass the receive loop.
-func (b *IceBind) AddConn(endpointStr string, c net.Conn) error {
+// SetEndpoint registers a relay conn for a fake endpoint address (for sending).
+func (b *RelayBind) SetEndpoint(endpointStr string, c net.Conn) error {
 	ap, err := netip.ParseAddrPort(endpointStr)
 	if err != nil {
 		return fmt.Errorf("parsing endpoint %q: %w", endpointStr, err)
 	}
 	b.mu.Lock()
-	b.conns[ap] = c
+	b.endpoints[ap] = c
 	b.mu.Unlock()
-
-	go b.receiveLoop(ap, c)
+	log.Debug().Str("endpoint", endpointStr).Msg("bind: registered relay endpoint")
 	return nil
 }
 
-// RegisterConn registers a conn for sending without starting a receiveLoop.
-func (b *IceBind) RegisterConn(endpointStr string, c net.Conn) error {
-	ap, err := netip.ParseAddrPort(endpointStr)
-	if err != nil {
-		return fmt.Errorf("parsing endpoint %q: %w", endpointStr, err)
-	}
-	b.mu.Lock()
-	b.conns[ap] = c
-	b.mu.Unlock()
-	return nil
-}
-
-// InjectRecv directly injects a received packet into WireGuard's receive path.
-func (b *IceBind) InjectRecv(data []byte, src netip.AddrPort) {
+// ReceiveFromRelay injects a received packet into WireGuard via the relay channel.
+func (b *RelayBind) ReceiveFromRelay(data []byte, src netip.AddrPort) {
 	pkt := make([]byte, len(data))
 	copy(pkt, data)
 	select {
-	case b.recvCh <- recvPacket{data: pkt, src: src}:
+	case b.relayCh <- relayPacket{data: pkt, src: src}:
 	case <-b.doneCh:
 	}
 }
 
-// RemoveConn removes and closes the ICE conn for an endpoint.
-func (b *IceBind) RemoveConn(endpointStr string) {
-	ap, err := netip.ParseAddrPort(endpointStr)
-	if err != nil {
-		return
-	}
-	b.mu.Lock()
-	c, ok := b.conns[ap]
-	delete(b.conns, ap)
-	b.mu.Unlock()
-	if ok {
-		c.Close()
-	}
-}
-
-func (b *IceBind) receiveLoop(src netip.AddrPort, c net.Conn) {
-	log.Debug().Str("src", src.String()).Msg("bind: receiveLoop started")
-	buf := make([]byte, 1<<16)
-	for {
-		n, err := c.Read(buf)
-		if err != nil {
-			log.Warn().Err(err).Str("src", src.String()).Msg("bind: receiveLoop exiting")
-			return
-		}
-		pkt := make([]byte, n)
-		copy(pkt, buf[:n])
-		select {
-		case b.recvCh <- recvPacket{data: pkt, src: src}:
-		case <-b.doneCh:
-			return
-		}
+// receiveRelayed is the ReceiveFunc that wireguard-go calls in its own goroutine.
+func (b *RelayBind) receiveRelayed(bufs [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+	select {
+	case <-b.doneCh:
+		return 0, net.ErrClosed
+	case pkt := <-b.relayCh:
+		n := copy(bufs[0], pkt.data)
+		sizes[0] = n
+		eps[0] = &RelayEndpoint{addrPort: pkt.src}
+		log.Debug().Int("bytes", n).Str("from", pkt.src.String()).Msg("bind: relay → WireGuard")
+		return 1, nil
 	}
 }
 
 // ── conn.Bind interface ───────────────────────────────────────────────────────
 
-func (b *IceBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
-	recv := func(bufs [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
-		select {
-		case <-b.doneCh:
-			return 0, net.ErrClosed
-		case pkt := <-b.recvCh:
-			n := copy(bufs[0], pkt.data)
-			sizes[0] = n
-			eps[0] = &IceEndpoint{addrPort: pkt.src}
-			log.Debug().Int("bytes", n).Str("from", pkt.src.String()).Int("type", int(bufs[0][0])).Msg("bind: recv → WireGuard")
-			return 1, nil
-		}
-	}
-	return []conn.ReceiveFunc{recv}, 0, nil
+func (b *RelayBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
+	log.Info().Msg("bind: Open called — relay receive goroutine will start")
+	return []conn.ReceiveFunc{b.receiveRelayed}, 0, nil
 }
 
-func (b *IceBind) Close() error {
-	b.once.Do(func() { close(b.doneCh) })
+func (b *RelayBind) Close() error {
+	b.once.Do(func() {
+		close(b.doneCh)
+		log.Info().Msg("bind: closed")
+	})
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, c := range b.conns {
+	for _, c := range b.endpoints {
 		c.Close()
 	}
 	return nil
 }
 
-func (b *IceBind) SetMark(_ uint32) error { return nil }
+func (b *RelayBind) SetMark(_ uint32) error { return nil }
 
-func (b *IceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
-	ice, ok := ep.(*IceEndpoint)
+func (b *RelayBind) Send(bufs [][]byte, ep conn.Endpoint) error {
+	rEp, ok := ep.(*RelayEndpoint)
 	if !ok {
 		return fmt.Errorf("unexpected endpoint type %T", ep)
 	}
 	b.mu.RLock()
-	c, found := b.conns[ice.addrPort]
+	c, found := b.endpoints[rEp.addrPort]
 	b.mu.RUnlock()
 	if !found {
-		log.Warn().Str("endpoint", ice.addrPort.String()).Int("conns", len(b.conns)).Msg("bind: Send failed — no conn")
-		return fmt.Errorf("no conn for endpoint %s (have %d conns)", ice.addrPort, len(b.conns))
+		return fmt.Errorf("no relay conn for %s", rEp.addrPort)
 	}
 	for _, buf := range bufs {
-		log.Debug().Int("bytes", len(buf)).Str("to", ice.addrPort.String()).Int("type", int(buf[0])).Msg("bind: Send from WireGuard")
+		log.Debug().Int("bytes", len(buf)).Str("to", rEp.addrPort.String()).Msg("bind: WireGuard → relay")
 		if _, err := c.Write(buf); err != nil {
 			return err
 		}
@@ -155,28 +113,28 @@ func (b *IceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	return nil
 }
 
-func (b *IceBind) ParseEndpoint(s string) (conn.Endpoint, error) {
+func (b *RelayBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 	ap, err := netip.ParseAddrPort(s)
 	if err != nil {
 		return nil, err
 	}
-	return &IceEndpoint{addrPort: ap}, nil
+	return &RelayEndpoint{addrPort: ap}, nil
 }
 
-func (b *IceBind) BatchSize() int { return 1 }
+func (b *RelayBind) BatchSize() int { return 1 }
 
-// ── IceEndpoint ───────────────────────────────────────────────────────────────
+// ── RelayEndpoint ─────────────────────────────────────────────────────────────
 
-type IceEndpoint struct {
+type RelayEndpoint struct {
 	addrPort netip.AddrPort
 }
 
-func (e *IceEndpoint) ClearSrc()           {}
-func (e *IceEndpoint) SrcToString() string { return "" }
-func (e *IceEndpoint) DstToString() string { return e.addrPort.String() }
-func (e *IceEndpoint) DstToBytes() []byte {
+func (e *RelayEndpoint) ClearSrc()           {}
+func (e *RelayEndpoint) SrcToString() string { return "" }
+func (e *RelayEndpoint) DstToString() string { return e.addrPort.String() }
+func (e *RelayEndpoint) DstToBytes() []byte {
 	b, _ := e.addrPort.MarshalBinary()
 	return b
 }
-func (e *IceEndpoint) DstIP() netip.Addr { return e.addrPort.Addr() }
-func (e *IceEndpoint) SrcIP() netip.Addr { return netip.Addr{} }
+func (e *RelayEndpoint) DstIP() netip.Addr { return e.addrPort.Addr() }
+func (e *RelayEndpoint) SrcIP() netip.Addr { return netip.Addr{} }

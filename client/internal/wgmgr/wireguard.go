@@ -18,12 +18,12 @@ import (
 const defaultMTU = 1420
 
 // Manager manages a userspace WireGuard device whose UDP transport is provided
-// by per-peer ICE connections (via IceBind).
+// by per-peer ICE connections (via RelayBind).
 type Manager struct {
 	ifaceName    string
 	dev          *device.Device
 	tunDev       tun.Device
-	bind         *IceBind
+	bind         *RelayBind
 	privKey      wgtypes.Key
 	pubKeyB64    string
 	netstackMode bool
@@ -43,7 +43,7 @@ func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 		log.Warn().Msg("TUN device unavailable — using userspace netstack mode (no kernel interface)")
 		return &Manager{
 			ifaceName:    ifaceName,
-			bind:         NewIceBind(),
+			bind:         NewRelayBind(),
 			privKey:      privKey,
 			pubKeyB64:    pubKeyB64,
 			netstackMode: true,
@@ -53,7 +53,7 @@ func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 		return nil, fmt.Errorf("creating TUN %q: %w", ifaceName, err)
 	}
 
-	bind := NewIceBind()
+	bind := NewRelayBind()
 	logger := device.NewLogger(device.LogLevelError, "[wg] ")
 	dev := device.NewDevice(tunDev, bind, logger)
 
@@ -83,8 +83,8 @@ func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 // PublicKey returns the base64-encoded WireGuard public key.
 func (m *Manager) PublicKey() string { return m.pubKeyB64 }
 
-// Bind returns the IceBind so the ICE manager can register peer connections.
-func (m *Manager) Bind() *IceBind { return m.bind }
+// Bind returns the RelayBind so the ICE manager can register peer connections.
+func (m *Manager) Bind() *RelayBind { return m.bind }
 
 // NetstackMode returns true when the manager is operating in userspace
 // netstack mode (no kernel TUN device).
@@ -169,17 +169,12 @@ func (m *Manager) SetPeerEndpoint(pubKeyB64 string, endpoint string) error {
 }
 
 // UpdateEndpoint sets/updates the endpoint of an existing peer and registers
-// the ICE net.Conn with the bind layer.
-func (m *Manager) UpdateEndpoint(pubKeyB64 string, endpoint string, iceConn net.Conn) error {
-	if err := m.bind.AddConn(endpoint, iceConn); err != nil {
+// the relay net.Conn with the bind layer.
+func (m *Manager) UpdateEndpoint(pubKeyB64 string, endpoint string, relayConn net.Conn) error {
+	if err := m.bind.SetEndpoint(endpoint, relayConn); err != nil {
 		return err
 	}
-	pubKeyRaw, err := base64.StdEncoding.DecodeString(pubKeyB64)
-	if err != nil {
-		return err
-	}
-	pubHex := hex.EncodeToString(pubKeyRaw)
-	return m.dev.IpcSet(fmt.Sprintf("public_key=%s\nendpoint=%s\n", pubHex, endpoint))
+	return m.SetPeerEndpoint(pubKeyB64, endpoint)
 }
 
 // RemovePeer removes a WireGuard peer.
