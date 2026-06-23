@@ -54,13 +54,17 @@ services:
       context: .
       dockerfile: relay/Dockerfile
     restart: unless-stopped
-    network_mode: host
     environment:
       RELAY_PUBLIC_IP: "${RELAY_PUBLIC_IP:-127.0.0.1}"
       RELAY_UDP_PORT: "3478"
+      RELAY_MIN_PORT: "49152"
+      RELAY_MAX_PORT: "49252"
       RELAY_REALM: "blinex.co.uk"
       RELAY_AUTH_USER: "blinex"
       RELAY_AUTH_PASS: "${RELAY_AUTH_PASS:?Set RELAY_AUTH_PASS in .env}"
+    ports:
+      - "3478:3478/udp"
+      - "49152-49252:49152-49252/udp"
 
   dashboard:
     image: ghcr.io/djr-fp/blinex/dashboard:latest

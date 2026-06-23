@@ -16,11 +16,13 @@ func main() {
 	log.Info().Str("version", version).Msg("blinex relay starting")
 
 	cfg := server.Config{
-		PublicIP: getEnv("RELAY_PUBLIC_IP", "127.0.0.1"),
-		UDPPort:  getEnvInt("RELAY_UDP_PORT", 3478),
-		Realm:    getEnv("RELAY_REALM", "blinex.co.uk"),
-		AuthUser: getEnv("RELAY_AUTH_USER", "blinex"),
-		AuthPass: getEnv("RELAY_AUTH_PASS", "change-me"),
+		PublicIP:     getEnv("RELAY_PUBLIC_IP", "127.0.0.1"),
+		UDPPort:      getEnvInt("RELAY_UDP_PORT", 3478),
+		RelayMinPort: getEnvInt("RELAY_MIN_PORT", 49152),
+		RelayMaxPort: getEnvInt("RELAY_MAX_PORT", 49252),
+		Realm:        getEnv("RELAY_REALM", "blinex.co.uk"),
+		AuthUser:     getEnv("RELAY_AUTH_USER", "blinex"),
+		AuthPass:     getEnv("RELAY_AUTH_PASS", "change-me"),
 	}
 
 	if cfg.AuthPass == "change-me" {

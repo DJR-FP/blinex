@@ -9,11 +9,13 @@ import (
 )
 
 type Config struct {
-	PublicIP  string // public IP of this relay server
-	UDPPort   int    // TURN/STUN UDP port (default 3478)
-	Realm     string // TURN realm (e.g. "blinex.co.uk")
-	AuthUser  string // TURN long-term credential user
-	AuthPass  string // TURN long-term credential password
+	PublicIP      string // public IP of this relay server
+	UDPPort       int    // TURN/STUN UDP port (default 3478)
+	RelayMinPort  int    // minimum relay allocation port (default 49152)
+	RelayMaxPort  int    // maximum relay allocation port (default 49252)
+	Realm         string // TURN realm (e.g. "blinex.co.uk")
+	AuthUser      string // TURN long-term credential user
+	AuthPass      string // TURN long-term credential password
 }
 
 // Start starts a STUN+TURN server and blocks until it exits.
@@ -35,9 +37,11 @@ func Start(cfg Config) error {
 		PacketConnConfigs: []turn.PacketConnConfig{
 			{
 				PacketConn: udpListener,
-				RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{
+				RelayAddressGenerator: &turn.RelayAddressGeneratorPortRange{
 					RelayAddress: net.ParseIP(cfg.PublicIP),
 					Address:      "0.0.0.0",
+					MinPort:      uint16(cfg.RelayMinPort),
+					MaxPort:      uint16(cfg.RelayMaxPort),
 				},
 			},
 		},
