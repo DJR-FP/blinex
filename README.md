@@ -1,6 +1,6 @@
 # Bline-X
 
-[![Version](https://img.shields.io/badge/version-v0.9.6-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.10.3-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml)
@@ -628,12 +628,18 @@ The dashboard can't proxy API requests to the management server internally.
 
 ### Agent: TOFU server certificate changed
 
-The server's TLS cert was regenerated (e.g. after rebuilding containers). Delete the agent's pinned cert:
+The server's TLS cert changed since the agent pinned it. Delete the agent's pinned cert and restart:
 
 ```bash
 sudo rm /var/lib/blinex/state.json
 sudo systemctl restart blinex-agent
 ```
+
+> **v0.10.3+:** the management and signal servers persist their self-signed
+> certificate to a docker volume (`TLS_STATE_DIR`, default `/var/lib/blinex`),
+> so restarting or rebuilding the containers no longer changes the fingerprint.
+> You should only need this once (on first deploy of v0.10.3, or if you wipe the
+> `management_state` / `signal_state` volumes).
 
 ### Agent: authentication handshake failed
 
