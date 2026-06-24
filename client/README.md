@@ -85,6 +85,31 @@ sudo ./bin/agent
 sudo -E BLINEX_SETUP_KEY=... ./bin/agent
 ```
 
+## Status CLI
+
+While the agent is running, the same binary can query it for live state over a
+local Unix socket (`/var/run/blinex-agent.sock`) — like `netbird status`:
+
+```bash
+blinex-agent status     # this device: version, mesh IP, interface/mode, peer + route counts
+blinex-agent peers      # peers: hostname, mesh IP, DNS name, data path (direct | relay)
+blinex-agent routes     # advertised subnet / exit-node routes and their gateway
+blinex-agent version    # agent version
+```
+
+Example:
+
+```
+$ blinex-agent peers
+HOSTNAME         MESH IP      DNS                    PATH
+netmesh-client   100.64.0.2   netmesh-client.blinex  direct
+mentor-pi02-1    100.64.0.3   mentor-pi02-1.blinex   relay
+```
+
+`PATH` shows whether traffic to that peer is a **direct** ICE peer-to-peer
+connection or **relayed** through the signal server. Override the socket with
+`-socket <path>` if you changed it.
+
 ## Uninstalling
 
 Pre-built uninstall binaries are included in each [release](https://github.com/DJR-FP/blinex-agent/releases). The uninstaller removes the agent binary, service, config, state, and platform-specific resources.

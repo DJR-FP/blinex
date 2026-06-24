@@ -1,6 +1,6 @@
 # Bline-X
 
-[![Version](https://img.shields.io/badge/version-v0.10.6-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.11.0-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml)

@@ -187,6 +187,9 @@ func uninstallLinux() {
 		}
 	}
 
+	// Remove the control socket
+	os.Remove("/var/run/blinex-agent.sock")
+
 	// Remove WireGuard interface
 	if runSilent("ip", "link", "show", "blinex0") == nil {
 		info("Removing blinex0 interface...")

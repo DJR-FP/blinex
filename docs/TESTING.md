@@ -14,6 +14,18 @@ path. Run after deploying v0.10.2+ management and installing v0.10.x agents.
 **Baseline before starting:** all three can ping each other, and the dashboard
 shows all three with green dots ("3 of 3 connected").
 
+**Pre-flight on each device (v0.11.0+ CLI):**
+
+```bash
+blinex-agent status     # confirm version, mesh IP, "kernel mode", peer/route counts
+blinex-agent peers      # confirm all other peers are listed, note direct vs relay
+blinex-agent routes     # confirm route advertisements propagated (used in §2/§3)
+```
+
+> Subnet routing, exit nodes, and ACL enforcement all require **kernel-TUN mode**
+> (`blinex-agent status` shows `kernel`). Netstack-mode peers don't run iptables
+> and won't enforce or NAT. Put every test device in kernel mode first.
+
 ---
 
 ## 1. Tags + Access Control Rules
@@ -62,20 +74,29 @@ Make one peer advertise a LAN subnet so other peers can reach hosts behind it.
 **Setup:** pick a peer with a real LAN behind it (e.g. Mentor-Pi02-1 on
 `192.168.1.0/24` with another device at `192.168.1.50`).
 
+**Advertise (on the gateway — Mentor-Pi02-1):**
 1. Dashboard → Devices → **Mentor-Pi02-1** → **Routes** → add subnet `192.168.1.0/24`. Save.
-2. The card should show a `192.168.1.0/24` badge.
-3. Wait ~5s for sync.
-4. From **ubuntu**: `ip route get 192.168.1.50` → routes via `blinex0`.
-5. From ubuntu: `ping -c2 192.168.1.50` → **succeeds** (traffic relayed through Mentor-Pi02-1).
+2. The card shows a `192.168.1.0/24` badge.
+3. On Mentor-Pi02-1: `blinex-agent routes` → the row shows `192.168.1.0/24  this device  yes`.
+4. Confirm forwarding + NAT came up automatically:
+   - `cat /proc/sys/net/ipv4/ip_forward` → `1`
+   - `sudo iptables -t nat -S POSTROUTING | grep MASQUERADE` → a `100.64.0.0/10 … MASQUERADE` rule.
 
-On Mentor-Pi02-1, confirm forwarding + NAT is active:
-- `cat /proc/sys/net/ipv4/ip_forward` → `1`
-- `sudo iptables -t nat -S POSTROUTING | grep MASQUERADE` → a `100.64.0.0/10 ... MASQUERADE` rule.
+**Consume (on another peer — ubuntu):**
+5. Wait ~5s for sync. `blinex-agent routes` on ubuntu → shows `192.168.1.0/24  mentor-pi02-1  yes`.
+6. `ip route get 192.168.1.50` → routes via `blinex0`.
+7. `ping -c2 192.168.1.50` → **succeeds** (reaches the LAN host behind the gateway).
+8. Optional: `traceroute 192.168.1.50` → first hop is the gateway's mesh IP (100.64.0.3).
 
-✅ Pass: ubuntu reaches a LAN host behind Mentor-Pi02-1 by its real IP.
+✅ **Pass:** ubuntu reaches a LAN host behind Mentor-Pi02-1 by its real IP; both
+agents stay green in the dashboard.
+
+❌ **If it fails, capture:** `blinex-agent routes` on both; `ip route get 192.168.1.50`;
+`sudo iptables -t nat -S` and `cat /proc/sys/net/ipv4/ip_forward` on the gateway.
 
 ### Cleanup
-- Remove the `192.168.1.0/24` route. Confirm `ip route get 192.168.1.50` no longer uses `blinex0`.
+- Remove the `192.168.1.0/24` route. Confirm `ip route get 192.168.1.50` no
+  longer uses `blinex0` and `blinex-agent routes` no longer lists it.
 
 ---
 
@@ -85,17 +106,30 @@ Route a peer's **default** internet traffic through another mesh peer.
 
 **Setup:** make ubuntu an exit node; route Mentor-Pi02-1's traffic through it.
 
+**Advertise (on the exit — ubuntu):**
 1. Dashboard → Devices → **ubuntu** → **Routes** → toggle **Exit node** on (advertises `0.0.0.0/0`). Save. Card shows an **Exit node** badge.
-2. On ubuntu confirm forwarding/NAT (as in §2): `ip_forward=1`, MASQUERADE rule present.
-3. On **Mentor-Pi02-1**, before: `curl -s https://api.ipify.org` → note its public IP.
-4. Enable using ubuntu as exit (per current UX: select ubuntu as the exit/gateway for Mentor-Pi02-1).
-5. After: `curl -s https://api.ipify.org` from Mentor-Pi02-1 → now returns **ubuntu's public IP**.
-6. Confirm the control plane stays reachable: the agent should keep a host route to the management/signal server via the original gateway (no disconnect loop).
+2. `blinex-agent routes` on ubuntu → shows `0.0.0.0/0  this device  yes`.
+3. Confirm forwarding/NAT (as in §2): `ip_forward=1`, MASQUERADE rule present.
 
-✅ Pass: Mentor-Pi02-1's egress IP becomes ubuntu's; the agent stays connected.
+**Consume (on Mentor-Pi02-1):**
+4. Before switching: `curl -s https://api.ipify.org` → note its current public IP.
+5. Enable ubuntu as the exit/gateway for Mentor-Pi02-1 (dashboard route selection).
+6. Wait ~5s. `blinex-agent routes` on Mentor-Pi02-1 → shows `0.0.0.0/0  ubuntu`.
+7. `curl -s https://api.ipify.org` → now returns **ubuntu's public IP**.
+8. Control-plane safety: `blinex-agent status` still shows the mesh IP and peers,
+   and the dashboard keeps the device green — the agent pins a host route to the
+   management/signal server via the original gateway so it doesn't cut itself off.
+
+✅ **Pass:** Mentor-Pi02-1's egress IP becomes ubuntu's; the agent stays connected
+to the control plane (no disconnect/reconnect loop).
+
+❌ **If it fails, capture:** `journalctl -u blinex-agent -n 50` on Mentor-Pi02-1
+(look for the exit-node host-route lines); `ip route` before/after; whether the
+device drops to grey in the dashboard.
 
 ### Cleanup
-- Turn off the exit node. Confirm `curl https://api.ipify.org` from Mentor-Pi02-1 returns its own public IP again.
+- Turn off the exit node. Confirm `curl https://api.ipify.org` from
+  Mentor-Pi02-1 returns its own public IP again and `ip route` is restored.
 
 ---
 
