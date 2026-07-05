@@ -1,6 +1,6 @@
 # Bline-X
 
-[![Version](https://img.shields.io/badge/version-v0.11.0-blue)](#roadmap)
+[![Version](https://img.shields.io/badge/version-v0.11.1-blue)](#roadmap)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20BSL--1.1-blue)](#license)
 [![Build](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml/badge.svg)](https://github.com/DJR-FP/blinex/actions/workflows/docker.yml)
@@ -616,6 +616,43 @@ ICE agent ──── STUN candidate → hole-punch → direct P2P
 The ICE-established connection *is* the WireGuard transport — no port mismatch.
 
 **Role assignment:** The peer with the lexicographically smaller WireGuard public key becomes the ICE controller. Deterministic, no coordination needed.
+
+---
+
+## Security Hardening
+
+The control plane enforces the following, verified by the automated test suite:
+
+- **Peer identity binding (signal server).** When `MGMT_JWT_SECRET` is set, a peer
+  may only register on the signal relay under the WireGuard public key contained in
+  its JWT. It cannot register under, or mid-stream switch to, another peer's key —
+  this prevents hijacking another peer's signaling stream and relayed traffic.
+  Always set `MGMT_JWT_SECRET` on the signal server in production; without it the
+  relay accepts unauthenticated connections.
+- **Account isolation on enrollment.** A WireGuard public key already enrolled in
+  one account cannot be re-enrolled into another (a public key is not a secret).
+  Re-enrollment preserves the peer's IP, tags, and advertised routes.
+- **Authorization.** REST write operations (peer/route/rule/setup-key mutations)
+  require an `admin` JWT; reads are available to any authenticated peer. Every
+  peer/rule/setup-key operation is scoped to the caller's account (no IDOR).
+- **Login rate limiting.** gRPC `Login` and the REST admin login are rate-limited
+  per source IP (host only, so reconnecting on a new source port does not reset
+  the limit).
+- **Token revocation.** Deleting a peer revokes its JWTs and returns its mesh IP
+  to the IPAM pool.
+- **JWT validation.** Only HS256 is accepted; `alg=none` and wrong-secret tokens
+  are rejected; expiry is enforced.
+- **Dashboard.** Sends a strict Content-Security-Policy plus `HSTS`,
+  `X-Content-Type-Options`, `X-Frame-Options: DENY`, and `Referrer-Policy`. The
+  session cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` outside development.
+  Requires Next.js ≥ 14.2.35 (patches the middleware auth-bypass and cache-poisoning CVEs).
+
+**Production checklist:** set `MGMT_JWT_SECRET` (≥ 32 bytes) on management **and**
+signal, set `MGMT_ADMIN_PASSWORD`, set `RELAY_AUTH_PASS` (never leave `change-me`),
+rotate `BLINEX_DEFAULT_KEY` / create real setup keys, provide real TLS certs via
+`TLS_CERT_FILE` / `TLS_KEY_FILE`, and set `MGMT_ALLOWED_ORIGINS` to the dashboard's
+real origin. Rebuild binaries with a current Go 1.25.x patch release to pick up
+standard-library security fixes.
 
 ---
 

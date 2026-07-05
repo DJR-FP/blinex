@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	signalv1 "github.com/blinex/gen/signal/v1"
+	"github.com/blinex/signal/internal/auth"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,10 +27,19 @@ func New() *Server {
 func (s *Server) Send(stream signalv1.SignalService_SendServer) error {
 	var peerKey string
 
+	// When JWT auth is enabled the interceptor puts the caller's verified
+	// wg_pub_key in the context. A peer may only register under that key,
+	// preventing it from hijacking another peer's signaling stream.
+	authKey, authenticated := auth.KeyFromContext(stream.Context())
+
 	defer func() {
 		if peerKey != "" {
 			s.mu.Lock()
-			delete(s.streams, peerKey)
+			// Only remove our own registration; a reconnect may have already
+			// replaced this key with a newer stream.
+			if s.streams[peerKey] == stream {
+				delete(s.streams, peerKey)
+			}
 			s.mu.Unlock()
 			log.Info().Str("peer", peerKey[:min(8, len(peerKey))]).Msg("signal peer disconnected")
 		}
@@ -46,11 +56,20 @@ func (s *Server) Send(stream signalv1.SignalService_SendServer) error {
 
 		// Register the sender on first message.
 		if peerKey == "" {
+			if msg.Key == "" {
+				return status.Error(codes.InvalidArgument, "first message must set key")
+			}
+			if authenticated && msg.Key != authKey {
+				return status.Error(codes.PermissionDenied, "key does not match authenticated identity")
+			}
 			peerKey = msg.Key
 			s.mu.Lock()
 			s.streams[peerKey] = stream
 			s.mu.Unlock()
 			log.Info().Str("peer", peerKey[:min(8, len(peerKey))]).Msg("signal peer connected")
+		} else if msg.Key != peerKey {
+			// A peer must not change its identity mid-stream.
+			return status.Error(codes.PermissionDenied, "key changed mid-stream")
 		}
 
 		if msg.RemoteKey == "" {

@@ -188,7 +188,10 @@ func (e *Engine) Run(ctx context.Context) error {
 	go func() {
 		err := e.sig.Connect(ctx, loginResp.Token, func(msg *signalv1.Message) {
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
-				if ep, ok := e.relayEndpts[msg.Key]; ok {
+				e.mu.Lock()
+				ep, ok := e.relayEndpts[msg.Key]
+				e.mu.Unlock()
+				if ok {
 					e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
 				}
 				return
@@ -369,13 +372,13 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		//   Receive: signal relay → ReceiveFromRelay → bind, and
 		//            ICE conn → peerLink read loop → ReceiveFromRelay → bind
 		rc := relay.New(e.wg.PublicKey(), p.WgPubKey, e.sig)
-		e.relayConns[p.WgPubKey] = rc
 		endpoint := rc.Endpoint()
 		ep, _ := netip.ParseAddrPort(endpoint)
-		e.relayEndpts[p.WgPubKey] = ep
 
 		link := peerlink.New(ep, p.WgPubKey, rc, e.wg.Bind().ReceiveFromRelay)
 		e.mu.Lock()
+		e.relayConns[p.WgPubKey] = rc
+		e.relayEndpts[p.WgPubKey] = ep
 		e.links[p.WgPubKey] = link
 		e.mu.Unlock()
 
@@ -421,11 +424,12 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			link.Close()
 			delete(e.links, p.WgPubKey)
 		}
-		e.mu.Unlock()
 		delete(e.relayEndpts, p.WgPubKey)
-		if rc, ok := e.relayConns[p.WgPubKey]; ok {
+		rc, hasRC := e.relayConns[p.WgPubKey]
+		delete(e.relayConns, p.WgPubKey)
+		e.mu.Unlock()
+		if hasRC {
 			rc.Close()
-			delete(e.relayConns, p.WgPubKey)
 		}
 		log.Info().Str("peer", p.Hostname).Msg("peer removed")
 	}

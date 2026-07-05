@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -14,6 +15,22 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+type keyCtx struct{}
+
+// KeyFromContext returns the authenticated wg_pub_key set by StreamInterceptor.
+// The bool is false when no interceptor ran (auth disabled).
+func KeyFromContext(ctx context.Context) (string, bool) {
+	k, ok := ctx.Value(keyCtx{}).(string)
+	return k, ok
+}
+
+type wrappedStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedStream) Context() context.Context { return w.ctx }
 
 // ValidateHS256 validates a HS256-signed JWT and returns the wg_pub_key claim.
 func ValidateHS256(tokenStr, secret string) (string, error) {
@@ -67,9 +84,11 @@ func StreamInterceptor(secret string) grpc.StreamServerInterceptor {
 		if len(tok) > 7 && strings.EqualFold(tok[:7], "bearer ") {
 			tok = tok[7:]
 		}
-		if _, err := ValidateHS256(tok, secret); err != nil {
+		key, err := ValidateHS256(tok, secret)
+		if err != nil {
 			return status.Error(codes.Unauthenticated, "invalid token")
 		}
-		return handler(srv, ss)
+		ctx := context.WithValue(ss.Context(), keyCtx{}, key)
+		return handler(srv, &wrappedStream{ServerStream: ss, ctx: ctx})
 	}
 }

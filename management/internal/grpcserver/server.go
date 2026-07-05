@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -58,10 +59,16 @@ func (s *Server) GetServerKey(_ context.Context, _ *managementv1.GetServerKeyReq
 }
 
 func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*managementv1.LoginResponse, error) {
-	// Rate limit by source IP: 5 attempts per 60 seconds.
+	// Rate limit by source IP: 5 attempts per 60 seconds. Key on the host only —
+	// the ephemeral source port differs on every dial, so including it would let
+	// a caller bypass the limit by reconnecting.
 	peerIP := "unknown"
 	if p, ok := grpcpeer.FromContext(ctx); ok {
-		peerIP = p.Addr.String()
+		if host, _, err := net.SplitHostPort(p.Addr.String()); err == nil {
+			peerIP = host
+		} else {
+			peerIP = p.Addr.String()
+		}
 	}
 	if !s.loginLimits.Allow(peerIP) {
 		return nil, status.Error(codes.ResourceExhausted, "too many login attempts, please try again later")
@@ -106,9 +113,18 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 	}
 
 	if existing, err := s.store.GetPeer(ctx, req.WgPubKey); err == nil {
+		// A WireGuard public key is not secret. Refuse to re-enroll a key that
+		// already belongs to a different account, which would otherwise let a
+		// holder of one account's setup key hijack another account's peer record.
+		if existing.AccountID != sk.AccountID {
+			return nil, status.Error(codes.PermissionDenied, "public key already enrolled in another account")
+		}
 		// Re-enrollment: preserve the existing peer ID and IP.
 		peer.ID = existing.ID
 		peer.CreatedAt = existing.CreatedAt
+		// Preserve operator-managed fields that enrollment must not reset.
+		peer.Tags = existing.Tags
+		peer.AdvertisedRoutes = existing.AdvertisedRoutes
 	}
 
 	if err := s.store.SavePeer(ctx, peer); err != nil {
@@ -321,6 +337,11 @@ func expandTagRule(r *domain.Rule, tagIPs map[string][]string) []*domain.Rule {
 // NotifyAccount triggers a sync push to all connected peers in the account.
 func (s *Server) NotifyAccount(accountID string) {
 	s.notifyAll(accountID)
+}
+
+// ReleaseIP returns a deleted peer's leased mesh IP to the IPAM pool.
+func (s *Server) ReleaseIP(wgPubKey string) {
+	s.ipam.Release(wgPubKey)
 }
 
 func (s *Server) notifyAll(accountID string) {

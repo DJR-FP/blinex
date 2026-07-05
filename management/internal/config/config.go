@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"strconv"
 )
 
 type Config struct {
@@ -41,7 +40,7 @@ func Load() *Config {
 		}
 		defaultKey = "msk-" + hex.EncodeToString(b)
 		fmt.Fprintf(os.Stderr, "\n  *** GENERATED SETUP KEY: %s ***\n", defaultKey)
-		fmt.Fprintln(os.Stderr, "  Set BLINEX_DEFAULT_KEY to use a fixed key across restarts.\n")
+		fmt.Fprintln(os.Stderr, "  Set BLINEX_DEFAULT_KEY to use a fixed key across restarts.")
 	}
 
 	return &Config{
@@ -64,15 +63,6 @@ func Load() *Config {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
-	}
-	return fallback
-}
-
-func getEnvInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
 	}
 	return fallback
 }

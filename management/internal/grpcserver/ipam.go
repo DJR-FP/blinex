@@ -48,6 +48,13 @@ func (i *IPAM) Allocate(wgPubKey string) (string, error) {
 	return hostToIP(host), nil
 }
 
+// Release returns a key's leased IP to the pool. Safe to call for unknown keys.
+func (i *IPAM) Release(wgPubKey string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	delete(i.leased, wgPubKey)
+}
+
 // PreloadPeers restores IPAM state from persisted peers so that IPs already
 // assigned in a previous run are not re-allocated after a server restart.
 // Must be called before the server begins serving requests.

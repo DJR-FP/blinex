@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -175,6 +176,10 @@ func (s *Store) GetRulesByAccount(_ context.Context, accountID string) ([]*domai
 			out = append(out, &cp)
 		}
 	}
+	// Match the postgres store: rules evaluated in ascending priority order.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Priority < out[j].Priority
+	})
 	return out, nil
 }
 
