@@ -3,6 +3,14 @@
 A short manual test plan for the features that depend on a working mesh data
 path. Run after deploying v0.10.2+ management and installing v0.10.x agents.
 
+> **Automated tests (v0.11.1+).** The control plane and agent now ship a unit /
+> integration suite — run `go test ./...` in each module (`management`, `signal`,
+> `client`). It covers JWT auth & revocation, IPAM, login rate limiting, the
+> stores, REST authorization/IDOR, signal routing & peer-identity enforcement,
+> DNS resolution, peer diffing, and the relay/ICE data-path link. The manual
+> steps below complement it by exercising the parts that need real kernel TUN,
+> iptables, and multi-host traffic (which the unit suite cannot).
+
 **Reference setup** (adjust IPs to your mesh):
 
 | Host | Mesh IP | Mode |
