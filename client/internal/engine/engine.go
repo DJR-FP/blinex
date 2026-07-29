@@ -326,7 +326,9 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 
 	// OS-level routing and exit node support require a kernel TUN interface.
 	if !e.wg.NetstackMode() {
-		// If we are the gateway for any route, set up IP forwarding + masquerade.
+		// If we are the gateway for any route, set up IP forwarding + masquerade;
+		// otherwise tear the masquerade down so withdrawing all advertised routes
+		// stops NATting (mirror of the ACL reconcile — never leave stale state).
 		if selfRoutes := routesByGateway[selfKey]; len(selfRoutes) > 0 {
 			if err := routing.EnableForwarding(); err != nil {
 				log.Warn().Err(err).Msg("failed to enable IP forwarding")
@@ -335,6 +337,8 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 				log.Warn().Err(err).Msg("failed to add iptables masquerade")
 			}
 			log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
+		} else {
+			routing.RemoveMasquerade(e.cfg.WGInterface)
 		}
 
 		// Detect whether a peer (not ourselves) is advertising a default route.
@@ -434,8 +438,11 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		log.Info().Str("peer", p.Hostname).Msg("peer removed")
 	}
 
-	// Apply ACL rules (iptables-based, only in kernel TUN mode).
-	if !e.wg.NetstackMode() && len(resp.Rules) > 0 {
+	// Apply ACL rules (iptables-based, only in kernel TUN mode). This must run on
+	// every sync regardless of rule count: when the last rule is deleted, resp.Rules
+	// is empty and ApplyRules([]) flushes the chain. Guarding on len(resp.Rules) > 0
+	// would leave stale DROP rules installed after a rule is removed.
+	if !e.wg.NetstackMode() {
 		if err := acl.EnsureChain(e.cfg.WGInterface); err != nil {
 			log.Warn().Err(err).Msg("ACL chain setup failed")
 		} else if err := acl.ApplyRules(resp.Rules, e.cfg.WGInterface); err != nil {

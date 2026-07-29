@@ -222,6 +222,13 @@ func (s *Server) setPeerRoutes(c *gin.Context) {
 
 	_, meshNet, _ := net.ParseCIDR("100.64.0.0/10")
 	for _, r := range req.Routes {
+		// Default routes (0.0.0.0/0, ::/0) are the exit-node advertisement. They
+		// necessarily "contain" the mesh CIDR but are legitimate — consumers handle
+		// them via split-tunnel (activateExitNode), never touching the mesh route.
+		// Exempt them from the loop-prevention overlap check below.
+		if r == "0.0.0.0/0" || r == "::/0" {
+			continue
+		}
 		_, cidr, err := net.ParseCIDR(r)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid CIDR: " + r})

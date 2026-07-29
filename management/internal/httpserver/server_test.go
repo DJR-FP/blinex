@@ -193,6 +193,29 @@ func TestSetPeerRoutesRejectsMeshOverlap(t *testing.T) {
 	}
 }
 
+// Regression: the mesh-overlap check must NOT reject the default route, which is
+// how an exit node advertises itself (0.0.0.0/0 "contains" the mesh CIDR but is
+// handled specially by consumers). Previously this returned 400, making the
+// exit-node feature unreachable via the API/dashboard.
+func TestSetPeerRoutesAllowsExitNodeDefaultRoute(t *testing.T) {
+	s, st, a := newTestServer()
+	_ = st.SavePeer(nil, &domain.Peer{ID: "1", AccountID: "default", WGPubKey: "k1"})
+
+	v4 := do(s, "PUT", "/api/v1/peers/k1/routes", adminToken(a), map[string]any{"routes": []string{"0.0.0.0/0"}})
+	if v4.Code != http.StatusOK {
+		t.Fatalf("expected 200 for exit-node 0.0.0.0/0, got %d (%s)", v4.Code, v4.Body.String())
+	}
+	v6 := do(s, "PUT", "/api/v1/peers/k1/routes", adminToken(a), map[string]any{"routes": []string{"::/0"}})
+	if v6.Code != http.StatusOK {
+		t.Fatalf("expected 200 for exit-node ::/0, got %d (%s)", v6.Code, v6.Body.String())
+	}
+	// A default route combined with a real LAN subnet should still work.
+	both := do(s, "PUT", "/api/v1/peers/k1/routes", adminToken(a), map[string]any{"routes": []string{"0.0.0.0/0", "192.168.5.0/24"}})
+	if both.Code != http.StatusOK {
+		t.Fatalf("expected 200 for exit-node + subnet, got %d (%s)", both.Code, both.Body.String())
+	}
+}
+
 // ---- rules ----
 
 func TestCreateRuleValidationAndSuccess(t *testing.T) {

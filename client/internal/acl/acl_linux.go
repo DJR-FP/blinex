@@ -13,6 +13,10 @@ import (
 
 const chain = "BLINEX-ACL"
 
+// iptablesRun executes the iptables binary with the given args. It is a package
+// var so tests can substitute a fake without invoking the real binary.
+var iptablesRun = func(args ...string) error { return run("iptables", args...) }
+
 // EnsureChain creates the BLINEX-ACL iptables chain and jumps to it from
 // INPUT and FORWARD if not already present.
 func EnsureChain(iface string) error {
@@ -38,7 +42,7 @@ func EnsureChain(iface string) error {
 // Only enabled rules are installed. If no deny rules exist the default is allow-all.
 func ApplyRules(rules []*commonv1.Rule, iface string) error {
 	// Flush existing rules
-	if err := run("iptables", "-F", chain); err != nil {
+	if err := iptablesRun("-F", chain); err != nil {
 		return fmt.Errorf("flush %s: %w", chain, err)
 	}
 
@@ -51,7 +55,7 @@ func ApplyRules(rules []*commonv1.Rule, iface string) error {
 			hasDeny = true
 		}
 		args := buildIPTablesArgs(r, iface)
-		if err := run("iptables", args...); err != nil {
+		if err := iptablesRun(args...); err != nil {
 			log.Warn().Err(err).Strs("args", args).Msg("ACL rule install failed")
 		}
 	}
@@ -59,7 +63,7 @@ func ApplyRules(rules []*commonv1.Rule, iface string) error {
 	// If any deny rules exist, add a default ACCEPT at the end so explicitly
 	// allowed traffic passes through after deny rules are evaluated.
 	if hasDeny {
-		run("iptables", "-A", chain, "-j", "ACCEPT")
+		iptablesRun("-A", chain, "-j", "ACCEPT")
 	}
 
 	return nil

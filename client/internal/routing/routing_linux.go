@@ -21,8 +21,11 @@ func EnableForwarding() error {
 // forwarded from the mesh is NATted to the device's external IP.
 // Idempotent — safe to call multiple times.
 func AddMasquerade(iface string) error {
-	// Scope to mesh source range only.
-	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "100.64.0.0/10", "-o", iface, "-j", "MASQUERADE").Run() != nil {
+	// Scope to mesh source range only. The existence check MUST match the rule
+	// that -A installs below exactly (same spec, no -o iface); otherwise -C never
+	// matches and every call appends a duplicate MASQUERADE rule (unbounded growth
+	// across sync ticks).
+	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE").Run() != nil {
 		out, err := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE").CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("iptables masquerade: %w: %s", err, out)
