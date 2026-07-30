@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
 // Forwarder provides transparent TCP/UDP forwarding through the netstack.
@@ -20,7 +19,7 @@ import (
 // connecting to mesh IPs are redirected to the forwarder port, which then
 // dials through the WireGuard tunnel via netstack.
 type Forwarder struct {
-	tnet     *netstack.Net
+	tnet     *RoutingNet
 	tcpPort  int
 	udpPort  int
 	meshCIDR string
@@ -31,7 +30,7 @@ type Forwarder struct {
 const forwarderPort = 51821
 
 // NewForwarder creates a transparent forwarder for the given mesh CIDR.
-func NewForwarder(tnet *netstack.Net, meshCIDR string) *Forwarder {
+func NewForwarder(tnet *RoutingNet, meshCIDR string) *Forwarder {
 	return &Forwarder{
 		tnet:     tnet,
 		tcpPort:  forwarderPort,
@@ -171,13 +170,18 @@ func (f *Forwarder) handleUDP(ctx context.Context, listener *net.UDPConn, srcAdd
 
 func (f *Forwarder) addIptables() error {
 	port := fmt.Sprintf("%d", f.tcpPort)
-	cmds := [][]string{
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-d", f.meshCIDR, "-p", "tcp", "-j", "REDIRECT", "--to-ports", port},
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-d", f.meshCIDR, "-p", "udp", "-j", "REDIRECT", "--to-ports", port},
-	}
-	for _, args := range cmds {
-		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
-			return fmt.Errorf("%v: %w: %s", args, err, out)
+	// Install each REDIRECT only if an identical rule is not already present, so
+	// an ungraceful restart (where removeIptables never ran) doesn't append a
+	// duplicate on every start.
+	for _, proto := range []string{"tcp", "udp"} {
+		match := []string{"-d", f.meshCIDR, "-p", proto, "-j", "REDIRECT", "--to-ports", port}
+		check := append([]string{"-t", "nat", "-C", "OUTPUT"}, match...)
+		if exec.Command("iptables", check...).Run() == nil {
+			continue // already present
+		}
+		add := append([]string{"-t", "nat", "-A", "OUTPUT"}, match...)
+		if out, err := exec.Command("iptables", add...).CombinedOutput(); err != nil {
+			return fmt.Errorf("iptables %v: %w: %s", add, err, out)
 		}
 	}
 	return nil

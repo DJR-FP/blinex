@@ -27,12 +27,13 @@ type Server struct {
 	router        *gin.Engine
 	notify        func(accountID string) // triggers gRPC sync push to all account peers
 	connected     func() map[string]bool // WG pubkeys with an active sync stream
+	releaseIP     func(wgPubKey string)  // returns a deleted peer's IP to the IPAM pool
 	version       string
 	adminUser     string
 	adminPassword string
 }
 
-func New(st store.Store, authMgr *auth.Manager, notify func(string), connected func() map[string]bool, version, adminUser, adminPassword string) *Server {
+func New(st store.Store, authMgr *auth.Manager, notify func(string), connected func() map[string]bool, releaseIP func(string), version, adminUser, adminPassword string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	// WireGuard public keys are base64 and contain '/', '+', '='. The dashboard
@@ -53,7 +54,7 @@ func New(st store.Store, authMgr *auth.Manager, notify func(string), connected f
 		MaxAge:           12 * time.Hour,
 	}))
 
-	s := &Server{store: st, auth: authMgr, router: r, notify: notify, connected: connected, version: version, adminUser: adminUser, adminPassword: adminPassword}
+	s := &Server{store: st, auth: authMgr, router: r, notify: notify, connected: connected, releaseIP: releaseIP, version: version, adminUser: adminUser, adminPassword: adminPassword}
 	s.registerRoutes()
 	return s
 }
@@ -204,6 +205,9 @@ func (s *Server) deletePeer(c *gin.Context) {
 		return
 	}
 	s.auth.RevokeByWGKey(key)
+	if s.releaseIP != nil {
+		s.releaseIP(key)
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -218,6 +222,13 @@ func (s *Server) setPeerRoutes(c *gin.Context) {
 
 	_, meshNet, _ := net.ParseCIDR("100.64.0.0/10")
 	for _, r := range req.Routes {
+		// Default routes (0.0.0.0/0, ::/0) are the exit-node advertisement. They
+		// necessarily "contain" the mesh CIDR but are legitimate — consumers handle
+		// them via split-tunnel (activateExitNode), never touching the mesh route.
+		// Exempt them from the loop-prevention overlap check below.
+		if r == "0.0.0.0/0" || r == "::/0" {
+			continue
+		}
 		_, cidr, err := net.ParseCIDR(r)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid CIDR: " + r})

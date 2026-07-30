@@ -10,7 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -26,7 +25,7 @@ type Manager struct {
 	privKey      wgtypes.Key
 	pubKeyB64    string
 	netstackMode bool
-	tnet         *netstack.Net // non-nil in netstack mode after SetAddress
+	tnet         *RoutingNet // non-nil in netstack mode after SetAddress
 }
 
 // New creates (or recreates) the named WireGuard interface using wireguard-go.
@@ -91,7 +90,16 @@ func (m *Manager) NetstackMode() bool { return m.netstackMode }
 
 // NetstackNet returns the netstack Net for dialing through the tunnel.
 // Only valid in netstack mode after SetAddress has been called.
-func (m *Manager) NetstackNet() *netstack.Net { return m.tnet }
+func (m *Manager) NetstackNet() *RoutingNet { return m.tnet }
+
+// SetRouterSubnets configures which advertised subnets this netstack peer
+// forwards to the real LAN (userspace subnet router). No-op outside netstack
+// mode. Passing an empty slice disables forwarding.
+func (m *Manager) SetRouterSubnets(subnets []netip.Prefix) {
+	if m.tnet != nil {
+		m.tnet.SetSubnets(subnets)
+	}
+}
 
 // SetAddress assigns a CIDR address to the TUN interface.
 // In netstack mode, this creates the userspace TUN and WireGuard device.

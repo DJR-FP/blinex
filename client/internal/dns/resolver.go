@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/dns/dnsmessage"
@@ -56,13 +57,17 @@ func (r *Resolver) Serve() error {
 	defer pc.Close()
 	log.Info().Str("addr", r.listenAddr).Str("suffix", r.suffix).Msg("DNS resolver started")
 
-	buf := make([]byte, 512)
+	buf := make([]byte, 4096)
 	for {
 		n, addr, err := pc.ReadFrom(buf)
 		if err != nil {
 			return err
 		}
-		go r.handle(pc, addr, buf[:n])
+		// Copy the packet: buf is reused by the next ReadFrom, so the handler
+		// goroutine must not alias it.
+		pkt := make([]byte, n)
+		copy(pkt, buf[:n])
+		go r.handle(pc, addr, pkt)
 	}
 }
 
@@ -82,7 +87,7 @@ func (r *Resolver) handle(pc net.PacketConn, addr net.Addr, raw []byte) {
 	ip, ok := r.records[name]
 	r.mu.RUnlock()
 
-	if ok && q.Type == dnsmessage.TypeA {
+	if ok && q.Type == dnsmessage.TypeA && ip.To4() != nil {
 		resp := dnsmessage.Message{
 			Header: dnsmessage.Header{
 				ID:                 msg.ID,
@@ -122,7 +127,8 @@ func (r *Resolver) forward(pc net.PacketConn, addr net.Addr, raw []byte) {
 	if _, err := conn.Write(raw); err != nil {
 		return
 	}
-	buf := make([]byte, 512)
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return

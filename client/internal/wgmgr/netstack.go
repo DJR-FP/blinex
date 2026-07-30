@@ -10,7 +10,6 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"golang.zx2c4.com/wireguard/tun"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
 // createTUN attempts to create a kernel TUN device. If /dev/net/tun is
@@ -38,18 +37,10 @@ func createTUN(ifaceName string) (tun.Device, error) {
 	return tun.CreateTUN(ifaceName, defaultMTU)
 }
 
-// createNetstackTUN creates a userspace TUN via gVisor netstack.
-// The address must be known at creation time.
-func createNetstackTUN(addr netip.Addr) (tun.Device, *netstack.Net, error) {
-	tunDev, tnet, err := netstack.CreateNetTUN(
-		[]netip.Addr{addr},
-		[]netip.Addr{netip.MustParseAddr("8.8.8.8")},
-		defaultMTU,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("creating netstack TUN: %w", err)
-	}
-	return tunDev, tnet, nil
+// createNetstackTUN creates a userspace, routing-capable TUN via gVisor
+// netstack (see nsrouter.go). The address must be known at creation time.
+func createNetstackTUN(addr netip.Addr) (tun.Device, *RoutingNet, error) {
+	return createRoutingNetTUN(addr, defaultMTU)
 }
 
 func isTUNUnavailable(err error) bool {

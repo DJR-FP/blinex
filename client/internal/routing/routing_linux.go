@@ -21,8 +21,11 @@ func EnableForwarding() error {
 // forwarded from the mesh is NATted to the device's external IP.
 // Idempotent — safe to call multiple times.
 func AddMasquerade(iface string) error {
-	// Scope to mesh source range only.
-	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "100.64.0.0/10", "-o", iface, "-j", "MASQUERADE").Run() != nil {
+	// Scope to mesh source range only. The existence check MUST match the rule
+	// that -A installs below exactly (same spec, no -o iface); otherwise -C never
+	// matches and every call appends a duplicate MASQUERADE rule (unbounded growth
+	// across sync ticks).
+	if exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE").Run() != nil {
 		out, err := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE").CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("iptables masquerade: %w: %s", err, out)
@@ -84,15 +87,29 @@ func GetDefaultGateway() (net.IP, string, error) {
 		return nil, "", fmt.Errorf("listing routes: %w", err)
 	}
 	for _, r := range routes {
-		if r.Dst == nil && r.Gw != nil {
-			link, err := netlink.LinkByIndex(r.LinkIndex)
-			if err != nil {
-				return nil, "", fmt.Errorf("resolving link index %d: %w", r.LinkIndex, err)
-			}
-			return r.Gw, link.Attrs().Name, nil
+		// A default route may be reported with Dst == nil OR with an explicit
+		// 0.0.0.0/0 Dst depending on kernel/netlink version — accept both.
+		if !isDefaultDst(r.Dst) || r.Gw == nil {
+			continue
 		}
+		link, err := netlink.LinkByIndex(r.LinkIndex)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolving link index %d: %w", r.LinkIndex, err)
+		}
+		return r.Gw, link.Attrs().Name, nil
 	}
 	return nil, "", fmt.Errorf("no default gateway found")
+}
+
+// isDefaultDst reports whether a route destination represents the default route
+// (unspecified address with a /0 mask), covering both the nil and explicit
+// 0.0.0.0/0 representations netlink may return.
+func isDefaultDst(dst *net.IPNet) bool {
+	if dst == nil {
+		return true
+	}
+	ones, _ := dst.Mask.Size()
+	return ones == 0 && dst.IP.IsUnspecified()
 }
 
 // AddHostRoute installs a /32 host route for ip via gwIP on the named interface.

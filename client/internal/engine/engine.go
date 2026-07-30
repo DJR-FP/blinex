@@ -188,7 +188,10 @@ func (e *Engine) Run(ctx context.Context) error {
 	go func() {
 		err := e.sig.Connect(ctx, loginResp.Token, func(msg *signalv1.Message) {
 			if msg.Body != nil && msg.Body.Type == signalv1.Body_RELAY {
-				if ep, ok := e.relayEndpts[msg.Key]; ok {
+				e.mu.Lock()
+				ep, ok := e.relayEndpts[msg.Key]
+				e.mu.Unlock()
+				if ok {
 					e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
 				}
 				return
@@ -323,7 +326,9 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 
 	// OS-level routing and exit node support require a kernel TUN interface.
 	if !e.wg.NetstackMode() {
-		// If we are the gateway for any route, set up IP forwarding + masquerade.
+		// If we are the gateway for any route, set up IP forwarding + masquerade;
+		// otherwise tear the masquerade down so withdrawing all advertised routes
+		// stops NATting (mirror of the ACL reconcile — never leave stale state).
 		if selfRoutes := routesByGateway[selfKey]; len(selfRoutes) > 0 {
 			if err := routing.EnableForwarding(); err != nil {
 				log.Warn().Err(err).Msg("failed to enable IP forwarding")
@@ -332,6 +337,8 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 				log.Warn().Err(err).Msg("failed to add iptables masquerade")
 			}
 			log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
+		} else {
+			routing.RemoveMasquerade(e.cfg.WGInterface)
 		}
 
 		// Detect whether a peer (not ourselves) is advertising a default route.
@@ -347,6 +354,19 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		} else if !hasExitNode && e.exitNode != nil {
 			e.deactivateExitNode()
 		}
+	} else {
+		// Netstack mode: act as a userspace subnet router / exit node
+		// (NetBird/Tailscale style). The netstack forwards mesh→LAN (or
+		// mesh→internet, for a 0.0.0.0/0 exit advertisement) connections out via
+		// the host socket (auto-SNAT, no iptables). Default routes are included
+		// here — the forwarder handles TCP/UDP/ICMP for any destination.
+		var subnets []netip.Prefix
+		for _, cidr := range routesByGateway[selfKey] {
+			if p, err := netip.ParsePrefix(cidr); err == nil {
+				subnets = append(subnets, p)
+			}
+		}
+		e.wg.SetRouterSubnets(subnets)
 	}
 
 	added, updated, removed := e.peers.Diff(resp.Peers)
@@ -369,13 +389,13 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		//   Receive: signal relay → ReceiveFromRelay → bind, and
 		//            ICE conn → peerLink read loop → ReceiveFromRelay → bind
 		rc := relay.New(e.wg.PublicKey(), p.WgPubKey, e.sig)
-		e.relayConns[p.WgPubKey] = rc
 		endpoint := rc.Endpoint()
 		ep, _ := netip.ParseAddrPort(endpoint)
-		e.relayEndpts[p.WgPubKey] = ep
 
 		link := peerlink.New(ep, p.WgPubKey, rc, e.wg.Bind().ReceiveFromRelay)
 		e.mu.Lock()
+		e.relayConns[p.WgPubKey] = rc
+		e.relayEndpts[p.WgPubKey] = ep
 		e.links[p.WgPubKey] = link
 		e.mu.Unlock()
 
@@ -421,17 +441,21 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			link.Close()
 			delete(e.links, p.WgPubKey)
 		}
-		e.mu.Unlock()
 		delete(e.relayEndpts, p.WgPubKey)
-		if rc, ok := e.relayConns[p.WgPubKey]; ok {
+		rc, hasRC := e.relayConns[p.WgPubKey]
+		delete(e.relayConns, p.WgPubKey)
+		e.mu.Unlock()
+		if hasRC {
 			rc.Close()
-			delete(e.relayConns, p.WgPubKey)
 		}
 		log.Info().Str("peer", p.Hostname).Msg("peer removed")
 	}
 
-	// Apply ACL rules (iptables-based, only in kernel TUN mode).
-	if !e.wg.NetstackMode() && len(resp.Rules) > 0 {
+	// Apply ACL rules (iptables-based, only in kernel TUN mode). This must run on
+	// every sync regardless of rule count: when the last rule is deleted, resp.Rules
+	// is empty and ApplyRules([]) flushes the chain. Guarding on len(resp.Rules) > 0
+	// would leave stale DROP rules installed after a rule is removed.
+	if !e.wg.NetstackMode() {
 		if err := acl.EnsureChain(e.cfg.WGInterface); err != nil {
 			log.Warn().Err(err).Msg("ACL chain setup failed")
 		} else if err := acl.ApplyRules(resp.Rules, e.cfg.WGInterface); err != nil {

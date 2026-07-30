@@ -97,10 +97,3 @@ func (a *relayAddr) Network() string { return "udp" }
 func (a *relayAddr) String() string {
 	return fmt.Sprintf("%s:%d", a.ip, a.port)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

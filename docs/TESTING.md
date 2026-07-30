@@ -3,6 +3,14 @@
 A short manual test plan for the features that depend on a working mesh data
 path. Run after deploying v0.10.2+ management and installing v0.10.x agents.
 
+> **Automated tests (v0.11.1+).** The control plane and agent now ship a unit /
+> integration suite — run `go test ./...` in each module (`management`, `signal`,
+> `client`). It covers JWT auth & revocation, IPAM, login rate limiting, the
+> stores, REST authorization/IDOR, signal routing & peer-identity enforcement,
+> DNS resolution, peer diffing, and the relay/ICE data-path link. The manual
+> steps below complement it by exercising the parts that need real kernel TUN,
+> iptables, and multi-host traffic (which the unit suite cannot).
+
 **Reference setup** (adjust IPs to your mesh):
 
 | Host | Mesh IP | Mode |
@@ -22,9 +30,13 @@ blinex-agent peers      # confirm all other peers are listed, note direct vs rel
 blinex-agent routes     # confirm route advertisements propagated (used in §2/§3)
 ```
 
-> Subnet routing, exit nodes, and ACL enforcement all require **kernel-TUN mode**
-> (`blinex-agent status` shows `kernel`). Netstack-mode peers don't run iptables
-> and won't enforce or NAT. Put every test device in kernel mode first.
+> **ACL enforcement** requires **kernel-TUN mode** (`blinex-agent status` shows
+> `kernel`) — it uses iptables. **Subnet routing and exit nodes work in either
+> mode:** kernel peers forward + `MASQUERADE` via iptables, while netstack-mode
+> peers (unprivileged LXC, Windows, macOS) act as a **userspace subnet router /
+> exit node** (v0.12.0+) — the gVisor netstack forwards mesh→LAN (or
+> mesh→internet) TCP/UDP/ICMP out through the host socket (auto-SNAT, no
+> iptables). For the ACL tests below, put those devices in kernel mode first.
 
 ---
 
@@ -141,5 +153,8 @@ device drops to grey in the dashboard.
 - Sync state: `docker compose logs management --tail 30` on the control plane
 - Dashboard connection state: does the device still show green?
 
-> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs or run iptables
-> NAT, so subnet/exit-node advertising and ACL enforcement require kernel TUN.
+> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs (that needs
+> iptables), so ACLs require kernel TUN. They **can** act as a **subnet router or
+> exit node** (v0.12.0+) via the userspace gVisor forwarder — mesh→LAN /
+> mesh→internet TCP/UDP/ICMP is proxied out through the host socket (auto-SNAT),
+> which is how NetBird/Tailscale route through containers without a TUN device.
