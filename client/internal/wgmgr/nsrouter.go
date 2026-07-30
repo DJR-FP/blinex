@@ -17,6 +17,7 @@ package wgmgr
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -24,13 +25,17 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog/log"
+	xicmp "golang.org/x/net/icmp"
+	xipv4 "golang.org/x/net/ipv4"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
@@ -136,8 +141,18 @@ func (n *RoutingNet) SetSubnets(subnets []netip.Prefix) {
 	}
 }
 
-// shouldForward reports whether dst falls inside a configured advertised subnet.
+// meshExclude is never proxied out to the real network even under a 0.0.0.0/0
+// (exit-node) advertisement — mesh-internal traffic must stay on the mesh.
+var meshExclude = netip.MustParsePrefix("100.64.0.0/10")
+
+// shouldForward reports whether dst is a destination this peer proxies to the
+// real network: inside a configured advertised subnet (a specific LAN, or
+// 0.0.0.0/0 for an exit node), a routable unicast address, and not mesh-internal.
 func (n *RoutingNet) shouldForward(dst netip.Addr) bool {
+	if !dst.IsValid() || dst.IsLoopback() || dst.IsUnspecified() ||
+		dst.IsLinkLocalUnicast() || dst.IsMulticast() || meshExclude.Contains(dst) {
+		return false
+	}
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	for _, s := range n.subnets {
@@ -203,6 +218,112 @@ func (n *RoutingNet) handleUDP(req *udp.ForwarderRequest) {
 	}()
 }
 
+// interceptICMPv4 detects an IPv4 ICMP echo request to a forwarded destination
+// and re-originates it from the host (see forwardICMPv4). gVisor exposes tcp/udp
+// Forwarders but not one for ICMP, so ping-through-router is handled at the link
+// layer. Returns true if the packet was consumed (must not be injected).
+func (n *RoutingNet) interceptICMPv4(packet []byte) bool {
+	if len(packet) < header.IPv4MinimumSize || packet[0]>>4 != 4 {
+		return false
+	}
+	if packet[9] != uint8(header.ICMPv4ProtocolNumber) {
+		return false
+	}
+	ihl := int(packet[0]&0x0f) * 4
+	if ihl < header.IPv4MinimumSize || len(packet) < ihl+header.ICMPv4MinimumSize {
+		return false
+	}
+	if packet[ihl] != byte(header.ICMPv4Echo) { // ICMP type 8 = echo request
+		return false
+	}
+	dst, ok := netip.AddrFromSlice(packet[16:20])
+	if !ok || !n.shouldForward(dst) {
+		return false
+	}
+	src, ok := netip.AddrFromSlice(packet[12:16])
+	if !ok {
+		return false
+	}
+	icmpMsg := append([]byte(nil), packet[ihl:]...)
+	go n.forwardICMPv4(src, dst, icmpMsg)
+	return true
+}
+
+// forwardICMPv4 pings dst from the host and, on success, injects a crafted echo
+// reply back toward src (the mesh sender) so ping/traceroute work through a
+// netstack exit node / subnet router.
+func (n *RoutingNet) forwardICMPv4(src, dst netip.Addr, icmpMsg []byte) {
+	defer func() { _ = recover() }() // incomingPacket may close on shutdown
+
+	ident := binary.BigEndian.Uint16(icmpMsg[4:6])
+	seq := binary.BigEndian.Uint16(icmpMsg[6:8])
+	payload := icmpMsg[header.ICMPv4MinimumSize:]
+	if !pingHost(dst, ident, seq, payload) {
+		return
+	}
+
+	total := header.IPv4MinimumSize + header.ICMPv4MinimumSize + len(payload)
+	pkt := make([]byte, total)
+	ip := header.IPv4(pkt)
+	ip.Encode(&header.IPv4Fields{
+		TotalLength: uint16(total),
+		TTL:         64,
+		Protocol:    uint8(header.ICMPv4ProtocolNumber),
+		SrcAddr:     tcpip.AddrFromSlice(dst.AsSlice()), // reply comes "from" the target
+		DstAddr:     tcpip.AddrFromSlice(src.AsSlice()), // back to the mesh sender
+	})
+	ip.SetChecksum(^ip.CalculateChecksum())
+
+	ic := header.ICMPv4(pkt[header.IPv4MinimumSize:])
+	ic.SetType(header.ICMPv4EchoReply)
+	ic.SetCode(0)
+	ic.SetIdent(ident)
+	ic.SetSequence(seq)
+	copy(pkt[header.IPv4MinimumSize+header.ICMPv4MinimumSize:], payload)
+	ic.SetChecksum(0)
+	ic.SetChecksum(^checksum.Checksum(ic, 0))
+
+	n.incomingPacket <- buffer.NewViewWithData(pkt)
+}
+
+// pingHost echoes dst from the host, preferring an unprivileged datagram ICMP
+// socket and falling back to a raw socket. Returns true if a reply arrives.
+func pingHost(dst netip.Addr, ident, seq uint16, payload []byte) bool {
+	msg := xicmp.Message{
+		Type: xipv4.ICMPTypeEcho, Code: 0,
+		Body: &xicmp.Echo{ID: int(ident), Seq: int(seq), Data: payload},
+	}
+	wire, err := msg.Marshal(nil)
+	if err != nil {
+		return false
+	}
+	for _, network := range []string{"udp4", "ip4:icmp"} {
+		c, err := xicmp.ListenPacket(network, "0.0.0.0")
+		if err != nil {
+			continue
+		}
+		var to net.Addr = &net.IPAddr{IP: net.IP(dst.AsSlice())}
+		if network == "udp4" {
+			to = &net.UDPAddr{IP: net.IP(dst.AsSlice())}
+		}
+		_ = c.SetDeadline(time.Now().Add(4 * time.Second))
+		if _, err := c.WriteTo(wire, to); err != nil {
+			c.Close()
+			continue
+		}
+		resp := make([]byte, 1500)
+		nn, _, err := c.ReadFrom(resp)
+		c.Close()
+		if err != nil {
+			continue
+		}
+		if rm, err := xicmp.ParseMessage(1, resp[:nn]); err == nil && rm.Type == xipv4.ICMPTypeEchoReply {
+			return true
+		}
+	}
+	return false
+}
+
 // pipeConns copies bytes bidirectionally between two connections until either
 // side closes or errors.
 func pipeConns(a, b net.Conn) {
@@ -241,6 +362,11 @@ func (n *RoutingNet) Write(buf [][]byte, offset int) (int, error) {
 	for _, b := range buf {
 		packet := b[offset:]
 		if len(packet) == 0 {
+			continue
+		}
+		// ICMP echo to a forwarded destination is handled out-of-band (the
+		// gVisor stack has no ICMP transport forwarder like tcp/udp do).
+		if n.interceptICMPv4(packet) {
 			continue
 		}
 		pkb := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(packet)})

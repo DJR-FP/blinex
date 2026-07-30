@@ -30,13 +30,13 @@ blinex-agent peers      # confirm all other peers are listed, note direct vs rel
 blinex-agent routes     # confirm route advertisements propagated (used in §2/§3)
 ```
 
-> **Exit nodes and ACL enforcement** require **kernel-TUN mode**
-> (`blinex-agent status` shows `kernel`) — those use iptables. **Subnet routing
-> works in either mode:** kernel peers forward + `MASQUERADE` via iptables, while
-> netstack-mode peers (unprivileged LXC, Windows, macOS) act as a **userspace
-> subnet router** (v0.12.0+) — the gVisor netstack forwards mesh→LAN connections
-> out through the host socket (auto-SNAT, no iptables). For the exit-node/ACL
-> tests below, put those devices in kernel mode first.
+> **ACL enforcement** requires **kernel-TUN mode** (`blinex-agent status` shows
+> `kernel`) — it uses iptables. **Subnet routing and exit nodes work in either
+> mode:** kernel peers forward + `MASQUERADE` via iptables, while netstack-mode
+> peers (unprivileged LXC, Windows, macOS) act as a **userspace subnet router /
+> exit node** (v0.12.0+) — the gVisor netstack forwards mesh→LAN (or
+> mesh→internet) TCP/UDP/ICMP out through the host socket (auto-SNAT, no
+> iptables). For the ACL tests below, put those devices in kernel mode first.
 
 ---
 
@@ -153,8 +153,8 @@ device drops to grey in the dashboard.
 - Sync state: `docker compose logs management --tail 30` on the control plane
 - Dashboard connection state: does the device still show green?
 
-> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs and cannot be an
-> **exit node** (both need iptables), so those require kernel TUN. They **can**
-> act as a **subnet router** (v0.12.0+) via the userspace gVisor forwarder —
-> mesh→LAN traffic is proxied out through the host socket (auto-SNAT), which is
-> how NetBird/Tailscale route through containers without a TUN device.
+> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs (that needs
+> iptables), so ACLs require kernel TUN. They **can** act as a **subnet router or
+> exit node** (v0.12.0+) via the userspace gVisor forwarder — mesh→LAN /
+> mesh→internet TCP/UDP/ICMP is proxied out through the host socket (auto-SNAT),
+> which is how NetBird/Tailscale route through containers without a TUN device.

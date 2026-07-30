@@ -355,15 +355,13 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			e.deactivateExitNode()
 		}
 	} else {
-		// Netstack mode: act as a userspace subnet router (NetBird/Tailscale
-		// style) for advertised subnets — the netstack forwards mesh→LAN
-		// connections out via the host socket (auto-SNAT, no iptables). Default
-		// routes (exit node) are not supported in userspace and are skipped.
+		// Netstack mode: act as a userspace subnet router / exit node
+		// (NetBird/Tailscale style). The netstack forwards mesh→LAN (or
+		// mesh→internet, for a 0.0.0.0/0 exit advertisement) connections out via
+		// the host socket (auto-SNAT, no iptables). Default routes are included
+		// here — the forwarder handles TCP/UDP/ICMP for any destination.
 		var subnets []netip.Prefix
 		for _, cidr := range routesByGateway[selfKey] {
-			if isDefaultRoute(cidr) {
-				continue
-			}
 			if p, err := netip.ParsePrefix(cidr); err == nil {
 				subnets = append(subnets, p)
 			}

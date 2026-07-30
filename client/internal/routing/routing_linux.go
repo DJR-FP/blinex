@@ -87,15 +87,29 @@ func GetDefaultGateway() (net.IP, string, error) {
 		return nil, "", fmt.Errorf("listing routes: %w", err)
 	}
 	for _, r := range routes {
-		if r.Dst == nil && r.Gw != nil {
-			link, err := netlink.LinkByIndex(r.LinkIndex)
-			if err != nil {
-				return nil, "", fmt.Errorf("resolving link index %d: %w", r.LinkIndex, err)
-			}
-			return r.Gw, link.Attrs().Name, nil
+		// A default route may be reported with Dst == nil OR with an explicit
+		// 0.0.0.0/0 Dst depending on kernel/netlink version — accept both.
+		if !isDefaultDst(r.Dst) || r.Gw == nil {
+			continue
 		}
+		link, err := netlink.LinkByIndex(r.LinkIndex)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolving link index %d: %w", r.LinkIndex, err)
+		}
+		return r.Gw, link.Attrs().Name, nil
 	}
 	return nil, "", fmt.Errorf("no default gateway found")
+}
+
+// isDefaultDst reports whether a route destination represents the default route
+// (unspecified address with a /0 mask), covering both the nil and explicit
+// 0.0.0.0/0 representations netlink may return.
+func isDefaultDst(dst *net.IPNet) bool {
+	if dst == nil {
+		return true
+	}
+	ones, _ := dst.Mask.Size()
+	return ones == 0 && dst.IP.IsUnspecified()
 }
 
 // AddHostRoute installs a /32 host route for ip via gwIP on the named interface.
