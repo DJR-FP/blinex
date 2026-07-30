@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
 // Forwarder provides transparent TCP/UDP forwarding through the netstack.
@@ -20,7 +19,7 @@ import (
 // connecting to mesh IPs are redirected to the forwarder port, which then
 // dials through the WireGuard tunnel via netstack.
 type Forwarder struct {
-	tnet     *netstack.Net
+	tnet     *RoutingNet
 	tcpPort  int
 	udpPort  int
 	meshCIDR string
@@ -31,7 +30,7 @@ type Forwarder struct {
 const forwarderPort = 51821
 
 // NewForwarder creates a transparent forwarder for the given mesh CIDR.
-func NewForwarder(tnet *netstack.Net, meshCIDR string) *Forwarder {
+func NewForwarder(tnet *RoutingNet, meshCIDR string) *Forwarder {
 	return &Forwarder{
 		tnet:     tnet,
 		tcpPort:  forwarderPort,

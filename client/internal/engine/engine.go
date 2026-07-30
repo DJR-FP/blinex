@@ -354,6 +354,21 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		} else if !hasExitNode && e.exitNode != nil {
 			e.deactivateExitNode()
 		}
+	} else {
+		// Netstack mode: act as a userspace subnet router (NetBird/Tailscale
+		// style) for advertised subnets — the netstack forwards mesh→LAN
+		// connections out via the host socket (auto-SNAT, no iptables). Default
+		// routes (exit node) are not supported in userspace and are skipped.
+		var subnets []netip.Prefix
+		for _, cidr := range routesByGateway[selfKey] {
+			if isDefaultRoute(cidr) {
+				continue
+			}
+			if p, err := netip.ParsePrefix(cidr); err == nil {
+				subnets = append(subnets, p)
+			}
+		}
+		e.wg.SetRouterSubnets(subnets)
 	}
 
 	added, updated, removed := e.peers.Diff(resp.Peers)

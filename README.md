@@ -73,7 +73,11 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 4. On kernel-TUN devices the agent installs a `100.64.0.0/10` route so mesh
    traffic reaches the WireGuard interface, and uses `netlink` + iptables for
    subnet routing / exit-node MASQUERADE. In netstack mode (no `/dev/net/tun`,
-   e.g. unprivileged LXC) it serves inbound traffic in userspace.
+   e.g. unprivileged LXC) it serves inbound traffic in userspace **and can act as
+   a subnet router**: a gVisor netstack forwarder proxies mesh→LAN connections
+   out through the host socket (auto-SNAT, no iptables) — the same userspace
+   approach NetBird/Tailscale use to route through containers. Exit nodes and ACL
+   enforcement still require kernel-TUN mode.
 
 > **Control-plane TLS:** management and signal use a self-signed cert by default,
 > **persisted** to a volume (`TLS_STATE_DIR`) so the TOFU fingerprint pinned by

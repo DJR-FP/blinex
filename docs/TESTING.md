@@ -30,9 +30,13 @@ blinex-agent peers      # confirm all other peers are listed, note direct vs rel
 blinex-agent routes     # confirm route advertisements propagated (used in §2/§3)
 ```
 
-> Subnet routing, exit nodes, and ACL enforcement all require **kernel-TUN mode**
-> (`blinex-agent status` shows `kernel`). Netstack-mode peers don't run iptables
-> and won't enforce or NAT. Put every test device in kernel mode first.
+> **Exit nodes and ACL enforcement** require **kernel-TUN mode**
+> (`blinex-agent status` shows `kernel`) — those use iptables. **Subnet routing
+> works in either mode:** kernel peers forward + `MASQUERADE` via iptables, while
+> netstack-mode peers (unprivileged LXC, Windows, macOS) act as a **userspace
+> subnet router** (v0.12.0+) — the gVisor netstack forwards mesh→LAN connections
+> out through the host socket (auto-SNAT, no iptables). For the exit-node/ACL
+> tests below, put those devices in kernel mode first.
 
 ---
 
@@ -149,5 +153,8 @@ device drops to grey in the dashboard.
 - Sync state: `docker compose logs management --tail 30` on the control plane
 - Dashboard connection state: does the device still show green?
 
-> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs or run iptables
-> NAT, so subnet/exit-node advertising and ACL enforcement require kernel TUN.
+> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs and cannot be an
+> **exit node** (both need iptables), so those require kernel TUN. They **can**
+> act as a **subnet router** (v0.12.0+) via the userspace gVisor forwarder —
+> mesh→LAN traffic is proxied out through the host socket (auto-SNAT), which is
+> how NetBird/Tailscale route through containers without a TUN device.
