@@ -23,10 +23,12 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	commonv1 "github.com/blinex/gen/common/v1"
 	"github.com/rs/zerolog/log"
 	xicmp "golang.org/x/net/icmp"
 	xipv4 "golang.org/x/net/ipv4"
@@ -62,8 +64,9 @@ type RoutingNet struct {
 	localAddr      netip.Addr
 	dialer         net.Dialer
 
-	mu      sync.RWMutex
-	subnets []netip.Prefix // advertised routes this peer forwards to the real LAN
+	mu       sync.RWMutex
+	subnets  []netip.Prefix    // advertised routes this peer forwards to the real LAN
+	aclRules []*commonv1.Rule  // ACL policy applied to forwarded traffic (priority-ordered)
 }
 
 // createRoutingNetTUN builds the routing-capable netstack for the given mesh
@@ -141,6 +144,61 @@ func (n *RoutingNet) SetSubnets(subnets []netip.Prefix) {
 	}
 }
 
+// SetACLRules installs the access-control policy applied to traffic this peer
+// forwards. Kernel peers enforce ACLs via the BLINEX-ACL iptables chain; a
+// netstack router has no iptables, so without this it would forward traffic that
+// policy denies. Called on every sync so the policy stays current.
+func (n *RoutingNet) SetACLRules(rules []*commonv1.Rule) {
+	n.mu.Lock()
+	n.aclRules = append(n.aclRules[:0:0], rules...)
+	n.mu.Unlock()
+}
+
+// aclAllows evaluates the ACL policy for a connection this router is about to
+// forward: src (mesh sender) → dst:dport over proto. Rules arrive already
+// priority-ordered and tag-expanded to concrete src/dst CIDRs; the first match
+// wins and the default (no match) is allow — mirroring the iptables BLINEX-ACL
+// chain kernel peers use, so netstack and kernel routers enforce the same policy.
+func (n *RoutingNet) aclAllows(src, dst netip.Addr, proto string, dport uint16) bool {
+	n.mu.RLock()
+	rules := n.aclRules
+	n.mu.RUnlock()
+	for _, r := range rules {
+		if !r.Enabled {
+			continue
+		}
+		if !aclHostMatch(r.Src, src) || !aclHostMatch(r.Dst, dst) {
+			continue
+		}
+		if p := strings.ToLower(r.Protocol); p != "" && p != "all" {
+			if p != proto {
+				continue
+			}
+			if r.Port > 0 && (p == "tcp" || p == "udp") && uint16(r.Port) != dport {
+				continue
+			}
+		}
+		return r.Action == "allow"
+	}
+	return true // deny-by-exception: default allow
+}
+
+// aclHostMatch reports whether ip matches an ACL src/dst field: "" or "*" is any,
+// otherwise a concrete IP or CIDR (post tag-expansion). An unparseable field
+// (e.g. an unexpanded "tag:...") never matches, so it can't accidentally allow.
+func aclHostMatch(field string, ip netip.Addr) bool {
+	if field == "" || field == "*" {
+		return true
+	}
+	if p, err := netip.ParsePrefix(field); err == nil {
+		return p.Contains(ip)
+	}
+	if a, err := netip.ParseAddr(field); err == nil {
+		return a == ip
+	}
+	return false
+}
+
 // meshExclude is never proxied out to the real network even under a 0.0.0.0/0
 // (exit-node) advertisement — mesh-internal traffic must stay on the mesh.
 var meshExclude = netip.MustParsePrefix("100.64.0.0/10")
@@ -170,6 +228,10 @@ func (n *RoutingNet) handleTCP(req *tcp.ForwarderRequest) {
 		req.Complete(true) // send RST — not a forwarded destination
 		return
 	}
+	if src, ok := netip.AddrFromSlice(id.RemoteAddress.AsSlice()); ok && !n.aclAllows(src, dst, "tcp", id.LocalPort) {
+		req.Complete(true) // send RST — denied by ACL policy
+		return
+	}
 	var wq waiter.Queue
 	ep, tcperr := req.CreateEndpoint(&wq)
 	if tcperr != nil {
@@ -197,6 +259,9 @@ func (n *RoutingNet) handleUDP(req *udp.ForwarderRequest) {
 	dst, ok := netip.AddrFromSlice(id.LocalAddress.AsSlice())
 	if !ok || !n.shouldForward(dst) {
 		return
+	}
+	if src, ok := netip.AddrFromSlice(id.RemoteAddress.AsSlice()); ok && !n.aclAllows(src, dst, "udp", id.LocalPort) {
+		return // drop — denied by ACL policy
 	}
 	var wq waiter.Queue
 	ep, uerr := req.CreateEndpoint(&wq)
@@ -243,6 +308,9 @@ func (n *RoutingNet) interceptICMPv4(packet []byte) bool {
 	src, ok := netip.AddrFromSlice(packet[12:16])
 	if !ok {
 		return false
+	}
+	if !n.aclAllows(src, dst, "icmp", 0) {
+		return true // consumed (dropped) — denied by ACL policy
 	}
 	icmpMsg := append([]byte(nil), packet[ihl:]...)
 	go n.forwardICMPv4(src, dst, icmpMsg)
