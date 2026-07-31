@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
 
-// Security headers applied to every response. The dashboard is a same-origin
-// app (its API routes proxy to the management server), so a strict CSP that
-// only permits 'self' plus inline styles (Tailwind) is sufficient.
+// Static security headers applied to every response. The Content-Security-Policy
+// is intentionally NOT here: it needs a per-request nonce so Next.js can run its
+// own inline hydration scripts (a static `script-src 'self'` blocks them and
+// leaves the page blank). The CSP is set in middleware.ts instead.
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
@@ -15,21 +16,6 @@ const securityHeaders = [
   {
     key: 'Strict-Transport-Security',
     value: 'max-age=63072000; includeSubDomains; preload',
-  },
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      "script-src 'self'",
-      // Tailwind/Next inject inline styles; allow them but nothing external.
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data:",
-      "font-src 'self'",
-      "connect-src 'self'",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-    ].join('; '),
   },
 ];
 
