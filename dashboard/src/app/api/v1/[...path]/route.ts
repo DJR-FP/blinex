@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { mgmtFetch } from '@/lib/mgmt'
 
 async function proxy(req: NextRequest): Promise<NextResponse> {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const token = cookieStore.get('blinex_token')?.value
   if (!token) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
