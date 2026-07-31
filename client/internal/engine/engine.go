@@ -367,6 +367,10 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			}
 		}
 		e.wg.SetRouterSubnets(subnets)
+		// Enforce ACLs on forwarded traffic in userspace — kernel peers do this
+		// via the BLINEX-ACL iptables chain, which a netstack peer has no access
+		// to, so without this a netstack router/exit would bypass ACL policy.
+		e.wg.SetRouterACL(resp.Rules)
 	}
 
 	added, updated, removed := e.peers.Diff(resp.Peers)

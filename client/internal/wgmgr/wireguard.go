@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strings"
 
+	commonv1 "github.com/blinex/gen/common/v1"
 	"github.com/rs/zerolog/log"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
@@ -98,6 +99,15 @@ func (m *Manager) NetstackNet() *RoutingNet { return m.tnet }
 func (m *Manager) SetRouterSubnets(subnets []netip.Prefix) {
 	if m.tnet != nil {
 		m.tnet.SetSubnets(subnets)
+	}
+}
+
+// SetRouterACL installs the ACL policy the netstack forwarder enforces on
+// traffic it routes/exits. No-op outside netstack mode (kernel peers enforce
+// ACLs via iptables instead).
+func (m *Manager) SetRouterACL(rules []*commonv1.Rule) {
+	if m.tnet != nil {
+		m.tnet.SetACLRules(rules)
 	}
 }
 
