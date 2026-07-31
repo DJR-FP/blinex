@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"net/netip"
 	"os"
@@ -51,6 +50,15 @@ import (
 
 const nsRouterNIC = 1
 
+// Resource bounds for forwarded traffic — a router/exit forwards on behalf of
+// other (potentially hostile) mesh peers, so cap concurrency to avoid fd /
+// goroutine / socket exhaustion, and close idle relays.
+const (
+	maxConcurrentForwards = 1024             // in-flight TCP+UDP flows being proxied
+	maxConcurrentICMP     = 64               // in-flight ping re-originations (one host socket each)
+	forwardIdleTimeout    = 90 * time.Second // close a relayed conn after this much silence
+)
+
 // RoutingNet is a userspace netstack that implements tun.Device (bridged to
 // WireGuard) and can forward traffic destined to advertised LAN subnets out to
 // the real network. It is a drop-in replacement for wireguard-go's netstack.Net
@@ -64,10 +72,35 @@ type RoutingNet struct {
 	localAddr      netip.Addr
 	dialer         net.Dialer
 
+	sem     chan struct{} // bounds concurrent TCP/UDP forwards
+	icmpSem chan struct{} // bounds concurrent ICMP re-originations
+
 	mu       sync.RWMutex
-	subnets  []netip.Prefix    // advertised routes this peer forwards to the real LAN
-	aclRules []*commonv1.Rule  // ACL policy applied to forwarded traffic (priority-ordered)
+	subnets  []netip.Prefix   // advertised routes this peer forwards to the real LAN
+	aclRules []*commonv1.Rule // ACL policy applied to forwarded traffic (priority-ordered)
 }
+
+// acquire/release bound concurrent forwards; acquire returns false when at
+// capacity so the caller can shed load instead of exhausting host resources.
+func (n *RoutingNet) acquire() bool {
+	select {
+	case n.sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+func (n *RoutingNet) release() { <-n.sem }
+
+func (n *RoutingNet) acquireICMP() bool {
+	select {
+	case n.icmpSem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+func (n *RoutingNet) releaseICMP() { <-n.icmpSem }
 
 // createRoutingNetTUN builds the routing-capable netstack for the given mesh
 // address. It returns the same object as both a tun.Device (for WireGuard) and
@@ -85,6 +118,8 @@ func createRoutingNetTUN(localAddr netip.Addr, mtu int) (tun.Device, *RoutingNet
 		incomingPacket: make(chan *buffer.View),
 		mtu:            mtu,
 		localAddr:      localAddr,
+		sem:            make(chan struct{}, maxConcurrentForwards),
+		icmpSem:        make(chan struct{}, maxConcurrentICMP),
 	}
 
 	sackEnabled := tcpip.TCPSACKEnabled(true)
@@ -214,9 +249,16 @@ func (n *RoutingNet) shouldForward(dst netip.Addr) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	for _, s := range n.subnets {
-		if s.Contains(dst) {
-			return true
+		if !s.Contains(dst) {
+			continue
 		}
+		// An exit node (0.0.0.0/0) grants internet egress, not access to the
+		// exit host's private network. Only forward RFC1918/ULA destinations
+		// when an explicit (non-default) subnet advertisement covers them.
+		if s.Bits() == 0 && dst.IsPrivate() {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -232,9 +274,14 @@ func (n *RoutingNet) handleTCP(req *tcp.ForwarderRequest) {
 		req.Complete(true) // send RST — denied by ACL policy
 		return
 	}
+	if !n.acquire() {
+		req.Complete(true) // send RST — router at forward capacity
+		return
+	}
 	var wq waiter.Queue
 	ep, tcperr := req.CreateEndpoint(&wq)
 	if tcperr != nil {
+		n.release()
 		req.Complete(true)
 		return
 	}
@@ -243,6 +290,7 @@ func (n *RoutingNet) handleTCP(req *tcp.ForwarderRequest) {
 
 	target := net.JoinHostPort(dst.String(), fmt.Sprintf("%d", id.LocalPort))
 	go func() {
+		defer n.release()
 		defer inConn.Close()
 		outConn, err := n.dialer.DialContext(context.Background(), "tcp", target)
 		if err != nil {
@@ -263,15 +311,20 @@ func (n *RoutingNet) handleUDP(req *udp.ForwarderRequest) {
 	if src, ok := netip.AddrFromSlice(id.RemoteAddress.AsSlice()); ok && !n.aclAllows(src, dst, "udp", id.LocalPort) {
 		return // drop — denied by ACL policy
 	}
+	if !n.acquire() {
+		return // drop — router at forward capacity
+	}
 	var wq waiter.Queue
 	ep, uerr := req.CreateEndpoint(&wq)
 	if uerr != nil {
+		n.release()
 		return
 	}
 	inConn := gonet.NewUDPConn(n.stack, &wq, ep)
 
 	target := net.JoinHostPort(dst.String(), fmt.Sprintf("%d", id.LocalPort))
 	go func() {
+		defer n.release()
 		defer inConn.Close()
 		outConn, err := n.dialer.DialContext(context.Background(), "udp", target)
 		if err != nil {
@@ -312,6 +365,9 @@ func (n *RoutingNet) interceptICMPv4(packet []byte) bool {
 	if !n.aclAllows(src, dst, "icmp", 0) {
 		return true // consumed (dropped) — denied by ACL policy
 	}
+	if !n.acquireICMP() {
+		return true // consumed (dropped) — at ICMP forward capacity
+	}
 	icmpMsg := append([]byte(nil), packet[ihl:]...)
 	go n.forwardICMPv4(src, dst, icmpMsg)
 	return true
@@ -321,6 +377,7 @@ func (n *RoutingNet) interceptICMPv4(packet []byte) bool {
 // reply back toward src (the mesh sender) so ping/traceroute work through a
 // netstack exit node / subnet router.
 func (n *RoutingNet) forwardICMPv4(src, dst netip.Addr, icmpMsg []byte) {
+	defer n.releaseICMP()
 	defer func() { _ = recover() }() // incomingPacket may close on shutdown
 
 	ident := binary.BigEndian.Uint16(icmpMsg[4:6])
@@ -393,11 +450,25 @@ func pingHost(dst netip.Addr, ident, seq uint16, payload []byte) bool {
 }
 
 // pipeConns copies bytes bidirectionally between two connections until either
-// side closes or errors.
+// side closes, errors, or goes idle for forwardIdleTimeout — so abandoned
+// relays (e.g. a peer that opened a flow and vanished) don't pin resources.
 func pipeConns(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	cp := func(dst, src net.Conn) {
-		io.Copy(dst, src)
+		buf := make([]byte, 32*1024)
+		for {
+			_ = src.SetReadDeadline(time.Now().Add(forwardIdleTimeout))
+			nr, rerr := src.Read(buf)
+			if nr > 0 {
+				_ = dst.SetWriteDeadline(time.Now().Add(forwardIdleTimeout))
+				if _, werr := dst.Write(buf[:nr]); werr != nil {
+					break
+				}
+			}
+			if rerr != nil {
+				break
+			}
+		}
 		done <- struct{}{}
 	}
 	go cp(a, b)

@@ -52,10 +52,23 @@ func TestRoutingNetExitNodeGating(t *testing.T) {
 			t.Errorf("exit node must forward internet dst %s", in)
 		}
 	}
-	for _, ex := range []string{"100.64.0.5", "127.0.0.1", "169.254.1.1", "224.0.0.1", "0.0.0.0"} {
+	// Excluded even under 0.0.0.0/0: mesh, loopback, link-local, multicast,
+	// unspecified — AND private (RFC1918/ULA), which an exit must not expose.
+	for _, ex := range []string{"100.64.0.5", "127.0.0.1", "169.254.1.1", "224.0.0.1", "0.0.0.0",
+		"192.168.1.10", "10.0.0.5", "172.16.9.9", "fd00::1"} {
 		if n.shouldForward(netip.MustParseAddr(ex)) {
-			t.Errorf("exit node must NOT forward %s (mesh/loopback/link-local/multicast)", ex)
+			t.Errorf("exit node must NOT forward %s", ex)
 		}
+	}
+
+	// But an EXPLICIT subnet advertisement for a private range is still forwarded
+	// (that's a subnet router, not an exit-node catch-all).
+	n.SetSubnets([]netip.Prefix{netip.MustParsePrefix("192.168.5.0/24")})
+	if !n.shouldForward(netip.MustParseAddr("192.168.5.10")) {
+		t.Error("explicit private subnet advertisement must be forwarded")
+	}
+	if n.shouldForward(netip.MustParseAddr("192.168.6.10")) {
+		t.Error("private dst outside the advertised subnet must not be forwarded")
 	}
 }
 
