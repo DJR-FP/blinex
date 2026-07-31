@@ -2,6 +2,8 @@ module github.com/blinex/relay
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	github.com/pion/logging v0.2.2
 	github.com/pion/turn/v3 v3.0.3

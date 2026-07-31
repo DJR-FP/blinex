@@ -2,6 +2,8 @@ module github.com/blinex/gen
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	google.golang.org/grpc v1.65.0
 	google.golang.org/protobuf v1.36.10

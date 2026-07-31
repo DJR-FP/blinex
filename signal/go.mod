@@ -2,6 +2,8 @@ module github.com/blinex/signal
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	github.com/blinex/gen v0.0.0
 	github.com/rs/zerolog v1.33.0

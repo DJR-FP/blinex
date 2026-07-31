@@ -2,6 +2,8 @@ module github.com/blinex/client
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	github.com/blinex/gen v0.0.0
 	github.com/pion/ice/v2 v2.3.36
@@ -10,8 +12,8 @@ require (
 	github.com/pion/turn/v3 v3.0.3
 	github.com/rs/zerolog v1.33.0
 	github.com/vishvananda/netlink v1.3.0
-	golang.org/x/net v0.53.0
-	golang.org/x/sys v0.43.0
+	golang.org/x/net v0.56.0
+	golang.org/x/sys v0.46.0
 	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	google.golang.org/grpc v1.65.0
@@ -37,8 +39,8 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117 // indirect
