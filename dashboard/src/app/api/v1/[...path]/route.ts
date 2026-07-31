@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-
-// Only skip TLS verification when explicitly opted in (self-signed certs).
-if (process.env.MGMT_TLS_SKIP_VERIFY === 'true') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-}
-
-const MGMT_URL = process.env.MGMT_API_URL ?? 'https://localhost:8080'
+import { mgmtFetch } from '@/lib/mgmt'
 
 async function proxy(req: NextRequest): Promise<NextResponse> {
   const cookieStore = cookies()
@@ -19,14 +13,14 @@ async function proxy(req: NextRequest): Promise<NextResponse> {
   // %2F into a literal '/', which would split base64 WireGuard keys and
   // break the upstream route. nextUrl.pathname preserves the encoding.
   const path = req.nextUrl.pathname.replace(/^\/api\/v1\//, '')
-  const url = `${MGMT_URL}/api/v1/${path}${req.nextUrl.search}`
+  const url = `/api/v1/${path}${req.nextUrl.search}`
 
   const body =
     req.method !== 'GET' && req.method !== 'HEAD' ? await req.text() : undefined
 
   let upstream: Response
   try {
-    upstream = await fetch(url, {
+    upstream = await mgmtFetch(url, {
       method: req.method,
       headers: {
         'Content-Type': 'application/json',

@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-if (process.env.MGMT_TLS_SKIP_VERIFY === 'true') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-}
-
-const MGMT_URL = process.env.MGMT_API_URL ?? 'https://localhost:8080'
+import { mgmtFetch } from '@/lib/mgmt'
 
 export async function POST(req: NextRequest) {
   let username: string | undefined
@@ -23,7 +18,7 @@ export async function POST(req: NextRequest) {
 
   let token: string | undefined
   try {
-    const upstream = await fetch(`${MGMT_URL}/api/v1/auth/login`, {
+    const upstream = await mgmtFetch(`/api/v1/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),

@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-if (process.env.MGMT_TLS_SKIP_VERIFY === 'true') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-}
-
-const MGMT_URL = process.env.MGMT_API_URL ?? 'https://localhost:8080'
+import { mgmtFetch } from '@/lib/mgmt'
 
 export async function POST(req: NextRequest) {
   let token: string | undefined
@@ -22,7 +17,7 @@ export async function POST(req: NextRequest) {
   // Validate the token against the management server before issuing a cookie.
   let valid = false
   try {
-    const check = await fetch(`${MGMT_URL}/api/v1/peers`, {
+    const check = await mgmtFetch(`/api/v1/peers`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     valid = check.ok
