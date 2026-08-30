@@ -34,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -47,6 +53,7 @@ jobs:
         with:
           context: .
           file: management/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           build-args: VERSION=${{ needs.version.outputs.version }}
           tags: |
@@ -63,6 +70,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -76,6 +89,7 @@ jobs:
         with:
           context: .
           file: signal/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           build-args: VERSION=${{ needs.version.outputs.version }}
           tags: |
@@ -92,6 +106,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -105,6 +125,7 @@ jobs:
         with:
           context: .
           file: relay/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           build-args: VERSION=${{ needs.version.outputs.version }}
           tags: |
@@ -121,6 +142,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -134,6 +161,7 @@ jobs:
         with:
           context: ./dashboard
           file: dashboard/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/dashboard:latest
