@@ -136,6 +136,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		Os:          runtime.GOOS,
 		Kernel:      runtime.GOARCH,
 		CoreVersion: e.cfg.Version,
+		LocalIp:     localOutboundIP(),
 	}
 
 	loginResp, err := e.enrollWithRetry(ctx, meta)
@@ -619,6 +620,22 @@ func shortKey(k string) string {
 		return k[:8]
 	}
 	return k
+}
+
+// localOutboundIP returns the local address the OS would use to reach the
+// public internet, without sending any packets (UDP dial just picks a
+// route). Best-effort — returns "" if no route is available.
+func localOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return ""
+	}
+	return addr.IP.String()
 }
 
 // guessMeshCIDR derives a broad CIDR for the mesh from the assigned address.

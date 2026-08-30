@@ -1,4 +1,15 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
+
 export default function SettingsPage() {
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    api.health().then(h => setVersion(h.version ?? '')).catch(() => {})
+  }, [])
+
   return (
     <div>
       <div className="mb-8">
@@ -10,12 +21,16 @@ export default function SettingsPage() {
           <h2 className="font-semibold text-gray-900 mb-4">Network</h2>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
+              <span className="text-gray-500">Server version</span>
+              <span className="font-mono text-gray-900">{version ? `v${version}` : '—'}</span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-gray-500">CIDR block</span>
               <span className="font-mono text-gray-900">100.64.0.0/10</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Magic DNS suffix</span>
-              <span className="font-mono text-gray-900">.mesh</span>
+              <span className="font-mono text-gray-900">.blinex</span>
             </div>
           </div>
         </div>

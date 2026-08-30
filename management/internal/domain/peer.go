@@ -6,7 +6,10 @@ type Peer struct {
 	ID               string    `json:"id"`
 	AccountID        string    `json:"account_id"`
 	WGPubKey         string    `json:"wg_pub_key"`
-	IP               string    `json:"ip"`
+	IP               string    `json:"ip"` // overlay/mesh IP
+	LocalIP          string    `json:"local_ip"`
+	PublicIP         string    `json:"public_ip"`
+	Country          string    `json:"country"`
 	Hostname         string    `json:"hostname"`
 	OS               string    `json:"os"`
 	Kernel           string    `json:"kernel"`

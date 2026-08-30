@@ -36,6 +36,9 @@ type peer struct {
 	AccountID        string    `gorm:"index"`
 	WGPubKey         string    `gorm:"uniqueIndex"`
 	IP               string
+	LocalIP          string
+	PublicIP         string
+	Country          string
 	Hostname         string
 	OS               string
 	Kernel           string
@@ -203,6 +206,9 @@ func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 		AccountID:        dp.AccountID,
 		WGPubKey:         dp.WGPubKey,
 		IP:               dp.IP,
+		LocalIP:          dp.LocalIP,
+		PublicIP:         dp.PublicIP,
+		Country:          dp.Country,
 		Hostname:         dp.Hostname,
 		OS:               dp.OS,
 		Kernel:           dp.Kernel,
@@ -281,6 +287,9 @@ func toDomainPeer(p *peer) *domain.Peer {
 		AccountID:        p.AccountID,
 		WGPubKey:         p.WGPubKey,
 		IP:               p.IP,
+		LocalIP:          p.LocalIP,
+		PublicIP:         p.PublicIP,
+		Country:          p.Country,
 		Hostname:         p.Hostname,
 		OS:               p.OS,
 		Kernel:           p.Kernel,

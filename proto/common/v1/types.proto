@@ -7,11 +7,14 @@ option go_package = "github.com/blinex/gen/common/v1;commonv1";
 message Peer {
   string id          = 1;
   string wg_pub_key  = 2;
-  string ip          = 3;
+  string ip          = 3; // overlay/mesh IP
   string hostname    = 4;
   string os          = 5;
   repeated string allowed_ips = 6;
   string dns_label   = 7; // e.g. "laptop" in laptop.alice.blinex
+  string local_ip    = 8;  // agent-reported LAN IP
+  string public_ip    = 9;  // server-observed source IP
+  string country       = 10; // geoIP country resolved from public_ip
 }
 
 message PeerMeta {
@@ -19,6 +22,7 @@ message PeerMeta {
   string os           = 2;
   string kernel       = 3;
   string core_version = 4;
+  string local_ip     = 5;
 }
 
 message NetworkConfig {

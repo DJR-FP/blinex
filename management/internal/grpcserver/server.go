@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/blinex/management/internal/auth"
 	"github.com/blinex/management/internal/domain"
+	"github.com/blinex/management/internal/geoip"
 	"github.com/blinex/management/internal/store"
 	commonv1 "github.com/blinex/gen/common/v1"
 	managementv1 "github.com/blinex/gen/management/v1"
@@ -62,14 +63,7 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 	// Rate limit by source IP: 5 attempts per 60 seconds. Key on the host only —
 	// the ephemeral source port differs on every dial, so including it would let
 	// a caller bypass the limit by reconnecting.
-	peerIP := "unknown"
-	if p, ok := grpcpeer.FromContext(ctx); ok {
-		if host, _, err := net.SplitHostPort(p.Addr.String()); err == nil {
-			peerIP = host
-		} else {
-			peerIP = p.Addr.String()
-		}
-	}
+	peerIP := sourceIP(ctx)
 	if !s.loginLimits.Allow(peerIP) {
 		return nil, status.Error(codes.ResourceExhausted, "too many login attempts, please try again later")
 	}
@@ -94,9 +88,11 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 
 	hostname := ""
 	os := ""
+	localIP := ""
 	if req.Meta != nil {
 		hostname = req.Meta.Hostname
 		os = req.Meta.Os
+		localIP = req.Meta.LocalIp
 	}
 
 	peer := &domain.Peer{
@@ -104,6 +100,8 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		AccountID:  sk.AccountID,
 		WGPubKey:   req.WgPubKey,
 		IP:         ip,
+		LocalIP:    localIP,
+		PublicIP:   peerIP,
 		Hostname:   hostname,
 		OS:         os,
 		DNSLabel:   toDNSLabel(hostname),
@@ -133,6 +131,7 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 	if err := s.store.IncrementSetupKeyUsage(ctx, sk.ID); err != nil {
 		log.Warn().Err(err).Msg("failed to increment setup key usage")
 	}
+	s.resolveCountryAsync(peer.WGPubKey, peer.PublicIP)
 
 	s.notifyAll(peer.AccountID)
 
@@ -169,6 +168,12 @@ func (s *Server) Sync(req *managementv1.SyncRequest, stream managementv1.Managem
 	sub := &syncSub{peerKey: req.WgPubKey, accountID: peer.AccountID, ch: make(chan struct{}, 1)}
 	s.registerSub(req.WgPubKey, sub)
 	s.touchLastSeen(stream.Context(), peer)
+	if ip := sourceIP(stream.Context()); ip != "" && ip != "unknown" && ip != peer.PublicIP {
+		peer.PublicIP = ip
+		if err := s.store.SavePeer(stream.Context(), peer); err == nil {
+			s.resolveCountryAsync(peer.WGPubKey, ip)
+		}
+	}
 	defer func() {
 		s.unregisterSub(req.WgPubKey)
 		// Record the disconnect time so the dashboard can show "last seen".
@@ -224,6 +229,9 @@ func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePee
 		peer.Kernel = req.Meta.Kernel
 		peer.Version = req.Meta.CoreVersion
 		peer.DNSLabel = toDNSLabel(req.Meta.Hostname)
+		if req.Meta.LocalIp != "" {
+			peer.LocalIP = req.Meta.LocalIp
+		}
 	}
 	peer.LastSeen = time.Now()
 	if err := s.store.SavePeer(ctx, peer); err != nil {
@@ -257,6 +265,9 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 			Os:         p.OS,
 			AllowedIps: allowedIPs,
 			DnsLabel:   p.DNSLabel,
+			LocalIp:    p.LocalIP,
+			PublicIp:   p.PublicIP,
+			Country:    p.Country,
 		})
 
 		for i, cidr := range p.AdvertisedRoutes {
@@ -390,6 +401,43 @@ func (s *Server) unregisterSub(key string) {
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
 	delete(s.subs, key)
+}
+
+// sourceIP extracts the caller's source IP from the gRPC peer context.
+func sourceIP(ctx context.Context) string {
+	p, ok := grpcpeer.FromContext(ctx)
+	if !ok {
+		return "unknown"
+	}
+	if host, _, err := net.SplitHostPort(p.Addr.String()); err == nil {
+		return host
+	}
+	return p.Addr.String()
+}
+
+// resolveCountryAsync looks up ip's country and persists it on the peer
+// identified by wgPubKey, without blocking the caller. Private/loopback/
+// unresolvable IPs are skipped — geoIP has nothing useful to say about them.
+func (s *Server) resolveCountryAsync(wgPubKey, ip string) {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.IsPrivate() || parsed.IsLoopback() || parsed.IsUnspecified() {
+		return
+	}
+	go func() {
+		country, err := geoip.Lookup(ip)
+		if err != nil {
+			log.Debug().Err(err).Str("ip", ip).Msg("geoip lookup failed")
+			return
+		}
+		peer, err := s.store.GetPeer(context.Background(), wgPubKey)
+		if err != nil || peer.PublicIP != ip {
+			return // peer gone, or public IP already moved on — stale result
+		}
+		peer.Country = country
+		if err := s.store.SavePeer(context.Background(), peer); err != nil {
+			log.Warn().Err(err).Msg("failed to save resolved country")
+		}
+	}()
 }
 
 func toDNSLabel(hostname string) string {

@@ -801,6 +801,7 @@ Version mismatch between agent and server. Make sure both are running the same v
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
+- [x] **Peer network visibility** — dashboard shows each device's local (LAN) IP, public IP, and geoIP-resolved country alongside its overlay IP; public IP captured server-side from the gRPC connection, country resolved via ip-api.com (v0.13.0)
 - [x] **Admin login** — username/password dashboard access via `MGMT_ADMIN_PASSWORD`; independent of agent enrollment (v0.5.1)
 - [x] **Security hardening** — HttpOnly cookie auth, TOFU cert pinning, gRPC rate limiting, JWT revocation on delete, signal server JWT auth, configurable CORS/DNS, 24h token expiry (v0.5.0)
 - [x] **Exit node OS routing** — split-tunnel /1 routes + host-route pinning for management/signal; no manual policy routing needed (v0.4.0)

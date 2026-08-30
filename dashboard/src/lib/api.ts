@@ -4,6 +4,9 @@ export interface Peer {
   id: string
   wg_pub_key: string
   ip: string
+  local_ip?: string
+  public_ip?: string
+  country?: string
   hostname: string
   os: string
   version: string

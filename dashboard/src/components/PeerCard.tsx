@@ -93,7 +93,15 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-0.5 font-mono">{peer.ip}</p>
+          <p className="text-sm text-gray-500 mt-0.5 font-mono">{peer.ip} <span className="text-gray-300">(overlay)</span></p>
+          {(peer.local_ip || peer.public_ip) && (
+            <p className="text-xs text-gray-400 mt-0.5 font-mono">
+              {peer.local_ip && <>local {peer.local_ip}</>}
+              {peer.local_ip && peer.public_ip && ' · '}
+              {peer.public_ip && <>public {peer.public_ip}</>}
+              {peer.country && <> ({peer.country})</>}
+            </p>
+          )}
           <p className="text-xs text-brand-500 mt-1">{peer.dns_label}.blinex</p>
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">
