@@ -22,7 +22,7 @@ export default function SettingsPage() {
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500">Server version</span>
-              <span className="font-mono text-gray-900">{version ? `v${version}` : '—'}</span>
+              <span className="font-mono text-gray-900">{version || '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">CIDR block</span>
