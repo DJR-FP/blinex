@@ -801,6 +801,7 @@ Version mismatch between agent and server. Make sure both are running the same v
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
+- [x] **Netstack inbound-to-local forwarding** — a netstack-mode peer (no kernel TUN, e.g. unprivileged LXC) now delivers TCP connections addressed to its own overlay IP to `127.0.0.1` on the real host, so a locally running service (e.g. `sshd`) is reachable from other mesh peers. Previously the overlay IP only existed inside the peer's isolated gVisor stack and any inbound connection got an RST even with the service genuinely running. ACL-gated the same way as subnet-router/exit-node traffic. TCP only for now (UDP local delivery not yet done). (v0.14.0)
 - [x] **Peer network visibility** — dashboard shows each device's local (LAN) IP, public IP, and geoIP-resolved country alongside its overlay IP; public IP captured server-side from the gRPC connection, country resolved via ip-api.com (v0.13.0)
 - [x] **Admin login** — username/password dashboard access via `MGMT_ADMIN_PASSWORD`; independent of agent enrollment (v0.5.1)
 - [x] **Security hardening** — HttpOnly cookie auth, TOFU cert pinning, gRPC rate limiting, JWT revocation on delete, signal server JWT auth, configurable CORS/DNS, 24h token expiry (v0.5.0)

@@ -10,6 +10,14 @@
 // the host's own socket, the LAN sees the router's host IP as source — SNAT is
 // automatic, so no iptables MASQUERADE is needed in netstack mode.
 //
+// The same TCP forwarder also delivers connections addressed to the
+// netstack's OWN overlay IP to 127.0.0.1 on the real host, so a locally
+// running service (e.g. sshd) is reachable from other mesh peers — see
+// handleTCP. Without this, the overlay IP only exists inside this isolated
+// gVisor stack and inbound connections to it get an RST, even though the
+// service is genuinely running on the host. UDP local delivery is not done
+// yet (gVisor's DialUDP has had more fragile edge cases here historically).
+//
 // wireguard-go's own netstack keeps its *stack.Stack private and runs with
 // HandleLocal:true (deliver-to-local-only, no forwarding), which is why we
 // stand up our own stack here rather than wrapping theirs.
@@ -266,7 +274,17 @@ func (n *RoutingNet) shouldForward(dst netip.Addr) bool {
 func (n *RoutingNet) handleTCP(req *tcp.ForwarderRequest) {
 	id := req.ID()
 	dst, ok := netip.AddrFromSlice(id.LocalAddress.AsSlice())
-	if !ok || !n.shouldForward(dst) {
+	if !ok {
+		req.Complete(true) // send RST — malformed destination
+		return
+	}
+	// A connection addressed to this netstack's own overlay IP is a request
+	// for a service running locally on the real host (e.g. sshd) — deliver it
+	// to loopback instead of running it through shouldForward, which exists
+	// to keep mesh-internal traffic OFF the LAN and would otherwise RST this
+	// exact address. Any other mesh-CIDR destination is still excluded there.
+	toLocalService := dst == n.localAddr
+	if !toLocalService && !n.shouldForward(dst) {
 		req.Complete(true) // send RST — not a forwarded destination
 		return
 	}
@@ -288,13 +306,17 @@ func (n *RoutingNet) handleTCP(req *tcp.ForwarderRequest) {
 	req.Complete(false)
 	inConn := gonet.NewTCPConn(&wq, ep)
 
-	target := net.JoinHostPort(dst.String(), fmt.Sprintf("%d", id.LocalPort))
+	dialAddr := dst
+	if toLocalService {
+		dialAddr = netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	}
+	target := net.JoinHostPort(dialAddr.String(), fmt.Sprintf("%d", id.LocalPort))
 	go func() {
 		defer n.release()
 		defer inConn.Close()
 		outConn, err := n.dialer.DialContext(context.Background(), "tcp", target)
 		if err != nil {
-			log.Debug().Err(err).Str("dst", target).Msg("subnet router: TCP dial to LAN failed")
+			log.Debug().Err(err).Str("dst", target).Msg("netstack: TCP dial failed")
 			return
 		}
 		defer outConn.Close()
