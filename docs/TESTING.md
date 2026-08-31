@@ -1,4 +1,4 @@
-# Bline-X Test Plan — Tags/ACLs, Subnets, Exit Nodes
+# Bline-X Test Plan — Groups/ACLs, Subnets, Exit Nodes
 
 A short manual test plan for the features that depend on a working mesh data
 path. Run after deploying v0.10.2+ management and installing v0.10.x agents.
@@ -30,52 +30,77 @@ blinex-agent peers      # confirm all other peers are listed, note direct vs rel
 blinex-agent routes     # confirm route advertisements propagated (used in §2/§3)
 ```
 
-> **ACL enforcement** requires **kernel-TUN mode** (`blinex-agent status` shows
-> `kernel`) — it uses iptables. **Subnet routing and exit nodes work in either
-> mode:** kernel peers forward + `MASQUERADE` via iptables, while netstack-mode
-> peers (unprivileged LXC, Windows, macOS) act as a **userspace subnet router /
-> exit node** (v0.12.0+) — the gVisor netstack forwards mesh→LAN (or
+> **ACL enforcement (v0.14.0+)** works in **both modes**: kernel-TUN peers
+> enforce via the `BLINEX-ACL` iptables chain; netstack-mode peers (unprivileged
+> LXC, Windows, macOS) enforce the identical policy in userspace via
+> `aclAllows`, for both traffic they forward (subnet-router/exit-node) *and*
+> connections addressed to their own overlay IP. **Subnet routing and exit
+> nodes also work in either mode:** kernel peers forward + `MASQUERADE` via
+> iptables, while netstack peers act as a **userspace subnet router / exit
+> node** (v0.12.0+) — the gVisor netstack forwards mesh→LAN (or
 > mesh→internet) TCP/UDP/ICMP out through the host socket (auto-SNAT, no
-> iptables). For the ACL tests below, put those devices in kernel mode first.
+> iptables).
+>
+> **Default policy is deny (v0.15.0+).** With zero rules, nothing can reach
+> anything — not even two devices in the same group. A fresh account is seeded
+> with one `group:Default → group:Default, allow` rule so an out-of-box mesh
+> isn't cut off (every device is always in `Default`, regardless of enrollment
+> path). §1 below exercises that seeded rule directly — delete it as part of
+> 1e and you'll see the mesh go fully silent, which is expected.
 
 ---
 
-## 1. Tags + Access Control Rules
+## 1. Groups + Access Control Rules
 
-ACLs are deny-by-exception: with no rules, everything is allowed. Adding a
-`deny` rule blocks matching traffic; `allow` rules carve out exceptions
-(evaluated by priority, lowest number first).
+Groups replace what used to be called tags. Every device is always in
+`Default`; setup keys can drop a newly-enrolled device straight into
+additional groups on top of it. ACL rules match `group:<name>`, evaluated in
+priority order (lowest number first), first match wins, **default deny**.
 
-### 1a. Assign tags
-1. Dashboard → Devices → on **ubuntu** click **Tags**, add `web`. Save.
-2. On **Mentor-Pi02-1** add tag `db`. Save.
-3. Dashboard → Access Rules → confirm the **Tag** dropdown now lists `web` and `db`.
+### 1a. Assign groups
+1. Dashboard → Devices → on **ubuntu** click **Groups**, add `web`. Save.
+2. On **Mentor-Pi02-1** add group `db`. Save.
+3. Dashboard → Access Rules → confirm the **Group** dropdown now lists `web` and `db`
+   (alongside `Default`, which every device already has).
 
-✅ Pass: tags appear on the device cards and in the rule editor dropdown.
+✅ Pass: groups appear on the device cards and in the rule editor dropdown.
 
-### 1b. Default allow
-- From ubuntu: `ping -c2 100.64.0.3` → **succeeds** (no rules yet).
+### 1b. Seeded default-allow
+- From ubuntu: `ping -c2 100.64.0.3` → **succeeds** — not because of an implicit
+  default-allow, but because both devices are in `Default` and the seeded
+  `Default → Default` rule permits it. Confirm it in Access Rules: a rule
+  named "Default allow", priority 1000, still enabled.
 
-### 1c. Deny by tag
-1. Add a rule: **source** `tag:web`, **destination** `tag:db`, protocol `all`, action **deny**, priority `100`, enabled.
+> **Test-tooling note:** if a device is netstack-mode, ICMP won't transparently
+> route the way TCP does (`iptables REDIRECT`, which the local-process
+> forwarder relies on, doesn't cover ICMP) — a plain `ping` from *inside* a
+> netstack host can show as blocked/unreachable even when the ACL itself
+> allows it. Use a real TCP connection (e.g. `nc -vz` or, more reliably since
+> some `nc` builds report success prematurely on a connection a deny rule
+> actually drops, a genuine SSH attempt) as the ground truth instead.
+
+### 1c. Deny by group
+1. Add a rule: **source** `group:web`, **destination** `group:db`, protocol `all`, action **deny**, priority `100`, enabled. (Lower number than the seeded 1000, so it's evaluated first.)
 2. Wait ~5s for the agents to sync.
 3. From ubuntu (`web`): `ping -c2 100.64.0.3` (`db`) → **fails / 100% loss**.
-4. From ubuntu: `ping -c2 100.64.0.2` (untagged) → **still succeeds** (rule only matches web→db).
+4. From ubuntu: `ping -c2 100.64.0.2` (in `Default` only) → **still succeeds** (rule only matches web→db; `Default → Default` still applies).
 
 ✅ Pass: only web→db is blocked; other paths unaffected.
 
 ### 1d. Allow exception by priority
-1. Add a higher-priority rule (lower number): source `tag:web`, dest `tag:db`, protocol `tcp`, port `22`, action **allow**, priority `50`.
-2. From ubuntu: `nc -vz 100.64.0.3 22` → **connects** (SSH allowed)…
+1. Add a higher-priority rule (lower number): source `group:web`, dest `group:db`, protocol `tcp`, port `22`, action **allow**, priority `50`.
+2. From ubuntu: a real SSH attempt to `100.64.0.3:22` → **reaches the SSH handshake** (allowed)…
 3. …while `ping -c2 100.64.0.3` (ICMP) → **still blocked** by the deny rule.
 
 ✅ Pass: the port-22 allow overrides the broad deny for TCP/22 only.
 
 ### 1e. Cleanup
-- Delete both rules. Confirm ubuntu can ping 100.64.0.3 again.
-
-> Note: ACLs are enforced on Linux kernel-TUN peers via the `BLINEX-ACL`
-> iptables chain. Netstack-mode peers do not enforce ACLs locally.
+- Delete both rules. Confirm ubuntu can ping 100.64.0.3 again (back to the
+  seeded `Default → Default` allow).
+- To see default-deny with nothing softening it, also delete the seeded
+  "Default allow" rule and confirm ubuntu can no longer reach 100.64.0.3 at
+  all — then re-create it (`group:Default → group:Default`, `all`, allow,
+  priority 1000) to restore the starting state.
 
 ---
 
@@ -153,8 +178,9 @@ device drops to grey in the dashboard.
 - Sync state: `docker compose logs management --tail 30` on the control plane
 - Dashboard connection state: does the device still show green?
 
-> Netstack-mode peers (no `/dev/net/tun`) do not enforce ACLs (that needs
-> iptables), so ACLs require kernel TUN. They **can** act as a **subnet router or
-> exit node** (v0.12.0+) via the userspace gVisor forwarder — mesh→LAN /
-> mesh→internet TCP/UDP/ICMP is proxied out through the host socket (auto-SNAT),
-> which is how NetBird/Tailscale route through containers without a TUN device.
+> Netstack-mode peers (no `/dev/net/tun`) enforce ACLs in userspace (v0.14.0+,
+> see the callout at the top of this doc) rather than iptables, and act as a
+> **subnet router or exit node** (v0.12.0+) via the same userspace gVisor
+> forwarder — mesh→LAN / mesh→internet TCP/UDP/ICMP is proxied out through the
+> host socket (auto-SNAT), which is how NetBird/Tailscale route through
+> containers without a TUN device.

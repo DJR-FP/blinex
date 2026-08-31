@@ -39,20 +39,19 @@ func EnsureChain(iface string) error {
 }
 
 // ApplyRules flushes the BLINEX-ACL chain and reinstalls rules in priority order.
-// Only enabled rules are installed. If no deny rules exist the default is allow-all.
+// Only enabled rules are installed. Default is deny: traffic not matched by an
+// explicit allow rule above is dropped, even when zero rules are configured at
+// all — a fresh account is seeded with one rule permitting Default↔Default so
+// this doesn't cut off an otherwise-unconfigured mesh (see domain.Rule).
 func ApplyRules(rules []*commonv1.Rule, iface string) error {
 	// Flush existing rules
 	if err := iptablesRun("-F", chain); err != nil {
 		return fmt.Errorf("flush %s: %w", chain, err)
 	}
 
-	hasDeny := false
 	for _, r := range rules {
 		if !r.Enabled {
 			continue
-		}
-		if r.Action == "deny" {
-			hasDeny = true
 		}
 		args := buildIPTablesArgs(r, iface)
 		if err := iptablesRun(args...); err != nil {
@@ -60,11 +59,10 @@ func ApplyRules(rules []*commonv1.Rule, iface string) error {
 		}
 	}
 
-	// If any deny rules exist, add a default ACCEPT at the end so explicitly
-	// allowed traffic passes through after deny rules are evaluated.
-	if hasDeny {
-		iptablesRun("-A", chain, "-j", "ACCEPT")
-	}
+	// Terminal deny: unconditional, so traffic that matched nothing above —
+	// including the zero-rules case — is dropped rather than falling through
+	// to the chain's caller (INPUT/FORWARD default ACCEPT policy).
+	iptablesRun("-A", chain, "-j", "DROP")
 
 	return nil
 }

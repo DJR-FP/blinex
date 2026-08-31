@@ -86,12 +86,17 @@ func (s *Server) registerRoutes() {
 
 	// Peers — read is available to all authenticated users
 	authenticated.GET("/peers", s.listPeers)
-	authenticated.GET("/tags", s.listTags)
 
 	// Peers — write operations require admin
 	admin.PUT("/peers/:key", s.updatePeer)
 	admin.DELETE("/peers/:key", s.deletePeer)
 	admin.PUT("/peers/:key/routes", s.setPeerRoutes)
+
+	// Groups — read for all, write for admin. Default always exists and
+	// can't be deleted (every peer belongs to it, always).
+	authenticated.GET("/groups", s.listGroups)
+	admin.POST("/groups", s.createGroup)
+	admin.DELETE("/groups/:id", s.deleteGroup)
 
 	// Setup keys — admin only
 	admin.GET("/setup-keys", s.listSetupKeys)
@@ -141,19 +146,21 @@ func (s *Server) updatePeer(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Tags []string `json:"tags"`
+		Groups []string `json:"groups"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	for _, t := range req.Tags {
-		if !isValidTag(t) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid tag %q: must be lowercase alphanumeric, hyphens, or underscores", t)})
+	for _, g := range req.Groups {
+		if !isValidGroupName(g) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid group %q: must be alphanumeric, hyphens, or underscores", g)})
 			return
 		}
 	}
-	peer.Tags = req.Tags
+	// Every peer is always in Default — enforce it here too, not just at
+	// enrollment, so the dashboard (or any other caller) can't remove it.
+	peer.Groups = ensureDefaultGroup(req.Groups)
 	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
 		log.Error().Err(err).Msg("updatePeer")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
@@ -163,28 +170,104 @@ func (s *Server) updatePeer(c *gin.Context) {
 	c.JSON(http.StatusOK, peer)
 }
 
-func (s *Server) listTags(c *gin.Context) {
+func ensureDefaultGroup(groups []string) []string {
+	for _, g := range groups {
+		if g == domain.DefaultGroupName {
+			return groups
+		}
+	}
+	return append([]string{domain.DefaultGroupName}, groups...)
+}
+
+func (s *Server) listGroups(c *gin.Context) {
 	claims := claimsFromCtx(c)
-	peers, err := s.store.GetPeersByAccount(c.Request.Context(), claims.AccountID)
+	groups, err := s.store.GetGroupsByAccount(c.Request.Context(), claims.AccountID)
 	if err != nil {
-		log.Error().Err(err).Msg("listTags")
+		log.Error().Err(err).Msg("listGroups")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
-	seen := make(map[string]bool)
-	var tags []string
+	// Peer counts aren't stored on the group row — compute them from live
+	// peer membership so the dashboard can show "3 devices" per group.
+	peers, err := s.store.GetPeersByAccount(c.Request.Context(), claims.AccountID)
+	if err != nil {
+		log.Error().Err(err).Msg("listGroups: peers")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	counts := make(map[string]int)
 	for _, p := range peers {
-		for _, t := range p.Tags {
-			if !seen[t] {
-				seen[t] = true
-				tags = append(tags, t)
-			}
+		for _, g := range p.Groups {
+			counts[g]++
 		}
 	}
-	if tags == nil {
-		tags = []string{}
+	type groupOut struct {
+		*domain.Group
+		PeerCount int `json:"peer_count"`
 	}
-	c.JSON(http.StatusOK, gin.H{"tags": tags})
+	out := make([]groupOut, len(groups))
+	for i, g := range groups {
+		out[i] = groupOut{Group: g, PeerCount: counts[g.Name]}
+	}
+	c.JSON(http.StatusOK, gin.H{"groups": out})
+}
+
+func (s *Server) createGroup(c *gin.Context) {
+	var req struct {
+		Name string `json:"name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !isValidGroupName(req.Name) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group name must be alphanumeric, hyphens, or underscores"})
+		return
+	}
+	claims := claimsFromCtx(c)
+	existing, err := s.store.GetGroupsByAccount(c.Request.Context(), claims.AccountID)
+	if err != nil {
+		log.Error().Err(err).Msg("createGroup: list existing")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	for _, g := range existing {
+		if g.Name == req.Name {
+			c.JSON(http.StatusConflict, gin.H{"error": "a group with that name already exists"})
+			return
+		}
+	}
+	g := &domain.Group{ID: uuid.NewString(), AccountID: claims.AccountID, Name: req.Name, CreatedAt: time.Now()}
+	if err := s.store.CreateGroup(c.Request.Context(), g); err != nil {
+		log.Error().Err(err).Msg("createGroup")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"group": g})
+}
+
+func (s *Server) deleteGroup(c *gin.Context) {
+	claims := claimsFromCtx(c)
+	id := c.Param("id")
+
+	groups, err := s.store.GetGroupsByAccount(c.Request.Context(), claims.AccountID)
+	if err != nil {
+		log.Error().Err(err).Msg("deleteGroup: list")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	for _, g := range groups {
+		if g.ID == id && g.Name == domain.DefaultGroupName {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "the Default group can't be deleted"})
+			return
+		}
+	}
+
+	if err := s.store.DeleteGroup(c.Request.Context(), claims.AccountID, id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) deletePeer(c *gin.Context) {
@@ -281,13 +364,20 @@ func (s *Server) listSetupKeys(c *gin.Context) {
 
 func (s *Server) createSetupKey(c *gin.Context) {
 	var req struct {
-		Name      string `json:"name" binding:"required"`
-		Ephemeral bool   `json:"ephemeral"`
-		ExpiresIn int    `json:"expires_in_days"` // 0 = 365 days
+		Name       string   `json:"name" binding:"required"`
+		Ephemeral  bool     `json:"ephemeral"`
+		ExpiresIn  int      `json:"expires_in_days"` // 0 = 365 days
+		AutoGroups []string `json:"auto_groups"`     // a peer enrolling with this key joins these too, on top of Default
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	for _, g := range req.AutoGroups {
+		if !isValidGroupName(g) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid group %q: must be alphanumeric, hyphens, or underscores", g)})
+			return
+		}
 	}
 
 	claims := claimsFromCtx(c)
@@ -298,13 +388,14 @@ func (s *Server) createSetupKey(c *gin.Context) {
 	expiry := time.Duration(expiresIn) * 24 * time.Hour
 
 	sk := &domain.SetupKey{
-		ID:        uuid.NewString(),
-		AccountID: claims.AccountID,
-		Key:       uuid.NewString(), // random secret token
-		Name:      req.Name,
-		Ephemeral: req.Ephemeral,
-		ExpiresAt: time.Now().Add(expiry),
-		CreatedAt: time.Now(),
+		ID:         uuid.NewString(),
+		AccountID:  claims.AccountID,
+		Key:        uuid.NewString(), // random secret token
+		Name:       req.Name,
+		Ephemeral:  req.Ephemeral,
+		AutoGroups: req.AutoGroups,
+		ExpiresAt:  time.Now().Add(expiry),
+		CreatedAt:  time.Now(),
 	}
 
 	if err := s.store.CreateSetupKey(c.Request.Context(), sk); err != nil {
@@ -328,10 +419,10 @@ func (s *Server) deleteSetupKey(c *gin.Context) {
 
 var validProtocols = map[string]bool{"tcp": true, "udp": true, "icmp": true, "all": true}
 
-var validTagRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+var validGroupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
-func isValidTag(t string) bool {
-	return len(t) > 0 && len(t) <= 64 && validTagRe.MatchString(t)
+func isValidGroupName(g string) bool {
+	return len(g) > 0 && len(g) <= 64 && validGroupNameRe.MatchString(g)
 }
 
 func validateRuleFields(src, dst, protocol string, port int) error {
@@ -339,15 +430,15 @@ func validateRuleFields(src, dst, protocol string, port int) error {
 		if val == "*" {
 			continue
 		}
-		if strings.HasPrefix(val, "tag:") {
-			if len(val) <= 4 {
-				return fmt.Errorf("%s tag name cannot be empty", label)
+		if strings.HasPrefix(val, "group:") {
+			if len(val) <= 6 {
+				return fmt.Errorf("%s group name cannot be empty", label)
 			}
 			continue
 		}
 		if net.ParseIP(val) == nil {
 			if _, _, err := net.ParseCIDR(val); err != nil {
-				return fmt.Errorf("%s must be '*', 'tag:<name>', a valid IP, or a CIDR", label)
+				return fmt.Errorf("%s must be '*', 'group:<name>', a valid IP, or a CIDR", label)
 			}
 		}
 	}

@@ -10,12 +10,13 @@ type Account struct {
 
 // SetupKey is a pre-shared enrollment token.
 type SetupKey struct {
-	ID        string    `json:"id"`
-	AccountID string    `json:"account_id"`
-	Key       string    `json:"key"`
-	Name      string    `json:"name"`
-	Ephemeral bool      `json:"ephemeral"`
-	UsedCount int       `json:"used_count"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID         string    `json:"id"`
+	AccountID  string    `json:"account_id"`
+	Key        string    `json:"key"`
+	Name       string    `json:"name"`
+	Ephemeral  bool      `json:"ephemeral"`
+	UsedCount  int       `json:"used_count"`
+	AutoGroups []string  `json:"auto_groups"` // groups a peer enrolling with this key joins, in addition to Default
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }

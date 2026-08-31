@@ -5,18 +5,25 @@ import { api, type SetupKey } from '@/lib/api'
 
 export default function SetupKeysPage() {
   const [keys, setKeys] = useState<SetupKey[]>([])
+  const [availableGroups, setAvailableGroups] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyEphemeral, setNewKeyEphemeral] = useState(false)
+  const [newKeyGroups, setNewKeyGroups] = useState<string[]>([])
+  const [newGroupInput, setNewGroupInput] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const data = await api.setupKeys.list()
-      setKeys(data.setup_keys ?? [])
+      const [keysData, groupsData] = await Promise.all([
+        api.setupKeys.list(),
+        api.groups.list(),
+      ])
+      setKeys(keysData.setup_keys ?? [])
+      setAvailableGroups((groupsData.groups ?? []).map(g => g.name).filter(n => n !== 'Default'))
     } catch (e) {
       setError(String(e))
     } finally {
@@ -25,6 +32,16 @@ export default function SetupKeysPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const toggleNewKeyGroup = (name: string) =>
+    setNewKeyGroups(prev => prev.includes(name) ? prev.filter(g => g !== name) : [...prev, name])
+
+  const addCustomGroup = () => {
+    const name = newGroupInput.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+    if (!name || newKeyGroups.includes(name)) return
+    setNewKeyGroups(prev => [...prev, name])
+    setNewGroupInput('')
+  }
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -35,9 +52,11 @@ export default function SetupKeysPage() {
         name: newKeyName,
         ephemeral: newKeyEphemeral,
         expires_in_days: 365,
+        auto_groups: newKeyGroups,
       })
       setKeys(prev => [data.setup_key, ...prev])
       setNewKeyName('')
+      setNewKeyGroups([])
       setShowCreate(false)
     } catch (e) {
       setError(String(e))
@@ -109,6 +128,56 @@ export default function SetupKeysPage() {
                 Ephemeral (one-time use)
               </label>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Groups <span className="text-gray-400 font-normal">(optional — device joins these plus Default)</span>
+              </label>
+              {availableGroups.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {availableGroups.map(g => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => toggleNewKeyGroup(g)}
+                      className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
+                        newKeyGroups.includes(g)
+                          ? 'bg-brand-500 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newGroupInput}
+                  onChange={e => setNewGroupInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomGroup() } }}
+                  placeholder="or type a new group name"
+                  className="flex-1 max-w-sm px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomGroup}
+                  className="text-xs text-gray-600 hover:text-gray-800 font-medium px-3 py-1.5 rounded-lg border border-gray-200"
+                >
+                  Add
+                </button>
+              </div>
+              {newKeyGroups.some(g => !availableGroups.includes(g)) && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {newKeyGroups.filter(g => !availableGroups.includes(g)).map(g => (
+                    <span key={g} className="inline-flex items-center gap-1 bg-brand-50 text-brand-600 px-2.5 py-1 rounded-full text-xs font-medium">
+                      {g} <span className="text-gray-400">(new)</span>
+                      <button type="button" onClick={() => toggleNewKeyGroup(g)} className="text-brand-400 hover:text-red-500">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -170,6 +239,16 @@ export default function SetupKeysPage() {
                 <p className="text-xs text-gray-400 mt-2">
                   Used {k.used_count}× · Expires {new Date(k.expires_at).toLocaleDateString()}
                 </p>
+                {k.auto_groups && k.auto_groups.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    <span className="text-xs text-gray-400">Joins:</span>
+                    {k.auto_groups.map(g => (
+                      <span key={g} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                        {g}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => handleDelete(k.id)}

@@ -74,58 +74,59 @@ func TestRoutingNetExitNodeGating(t *testing.T) {
 
 // A netstack router/exit has no iptables, so it enforces ACL policy in
 // userspace over the traffic it forwards. This must match the kernel BLINEX-ACL
-// semantics: priority-ordered, first match wins, default allow.
+// semantics: priority-ordered, first match wins, default deny.
 func TestRoutingNetACLEnforcement(t *testing.T) {
 	n := &RoutingNet{}
 	web := netip.MustParseAddr("100.64.0.7") // mesh sender
 	db := netip.MustParseAddr("192.168.5.10")
 	other := netip.MustParseAddr("100.64.0.9")
 
-	// No rules => allow (deny-by-exception).
-	if !n.aclAllows(web, db, "tcp", 5432) {
-		t.Fatal("no rules must default-allow")
+	// No rules => deny.
+	if n.aclAllows(web, db, "tcp", 5432) {
+		t.Fatal("no rules must default-deny")
 	}
 
-	// deny web -> 192.168.5.0/24 (all protocols).
+	// allow other -> 192.168.5.0/24 (all protocols), nothing for web.
 	n.SetACLRules([]*commonv1.Rule{
-		{Src: "100.64.0.7/32", Dst: "192.168.5.0/24", Protocol: "all", Action: "deny", Enabled: true, Priority: 100},
+		{Src: "100.64.0.9/32", Dst: "192.168.5.0/24", Protocol: "all", Action: "allow", Enabled: true, Priority: 100},
 	})
 	if n.aclAllows(web, db, "tcp", 5432) {
-		t.Error("deny web->db must block")
+		t.Error("web has no matching allow rule, must stay denied")
 	}
 	if n.aclAllows(web, db, "icmp", 0) {
-		t.Error("deny (all) must block icmp too")
+		t.Error("no rule matches web for icmp either, must stay denied")
 	}
 	if !n.aclAllows(other, db, "tcp", 5432) {
-		t.Error("non-matching source must still be allowed")
+		t.Error("matching source must be allowed")
 	}
 
-	// Higher-priority allow exception for tcp/22 (listed first, as the server
-	// sends rules priority-ascending).
+	// Higher-priority deny exception overriding a broader allow (listed
+	// first, as the server sends rules priority-ascending).
 	n.SetACLRules([]*commonv1.Rule{
-		{Src: "100.64.0.7/32", Dst: "192.168.5.0/24", Protocol: "tcp", Port: 22, Action: "allow", Enabled: true, Priority: 50},
-		{Src: "100.64.0.7/32", Dst: "192.168.5.0/24", Protocol: "all", Action: "deny", Enabled: true, Priority: 100},
-	})
-	if !n.aclAllows(web, db, "tcp", 22) {
-		t.Error("tcp/22 allow exception must permit")
-	}
-	if n.aclAllows(web, db, "tcp", 5432) {
-		t.Error("other ports still denied by the broad deny")
-	}
-
-	// Disabled rules are ignored.
-	n.SetACLRules([]*commonv1.Rule{
-		{Src: "*", Dst: "*", Protocol: "all", Action: "deny", Enabled: false, Priority: 100},
-	})
-	if !n.aclAllows(web, db, "tcp", 22) {
-		t.Error("disabled deny must be ignored")
-	}
-
-	// Wildcard deny blocks everything.
-	n.SetACLRules([]*commonv1.Rule{
-		{Src: "*", Dst: "*", Protocol: "all", Action: "deny", Enabled: true, Priority: 100},
+		{Src: "100.64.0.7/32", Dst: "192.168.5.0/24", Protocol: "tcp", Port: 22, Action: "deny", Enabled: true, Priority: 50},
+		{Src: "100.64.0.7/32", Dst: "192.168.5.0/24", Protocol: "all", Action: "allow", Enabled: true, Priority: 100},
 	})
 	if n.aclAllows(web, db, "tcp", 22) {
-		t.Error("wildcard deny must block")
+		t.Error("tcp/22 deny exception must block")
+	}
+	if !n.aclAllows(web, db, "tcp", 5432) {
+		t.Error("other ports still allowed by the broad allow")
+	}
+
+	// Disabled rules are ignored — with only a disabled allow, default-deny
+	// still applies.
+	n.SetACLRules([]*commonv1.Rule{
+		{Src: "*", Dst: "*", Protocol: "all", Action: "allow", Enabled: false, Priority: 100},
+	})
+	if n.aclAllows(web, db, "tcp", 22) {
+		t.Error("disabled allow must be ignored, falling back to default-deny")
+	}
+
+	// Wildcard allow permits everything.
+	n.SetACLRules([]*commonv1.Rule{
+		{Src: "*", Dst: "*", Protocol: "all", Action: "allow", Enabled: true, Priority: 100},
+	})
+	if !n.aclAllows(web, db, "tcp", 22) {
+		t.Error("wildcard allow must permit")
 	}
 }

@@ -63,16 +63,39 @@ func TestLoginAllocatesPeerAndToken(t *testing.T) {
 	if p.Hostname != "laptop" {
 		t.Fatalf("hostname not saved: %+v", p)
 	}
+	if len(p.Groups) != 1 || p.Groups[0] != domain.DefaultGroupName {
+		t.Fatalf("a first-time enrollee must be in Default and nothing else, got %+v", p.Groups)
+	}
 }
 
-func TestLoginReenrollPreservesIPAndTags(t *testing.T) {
+func TestLoginAutoGroupsFromSetupKey(t *testing.T) {
+	s, st := newTestServer(t)
+	ctx := context.Background()
+	_ = st.CreateSetupKey(ctx, &domain.SetupKey{
+		ID: "grouped", AccountID: "default", Key: "grouped-key",
+		AutoGroups: []string{"web", domain.DefaultGroupName}, // Default listed explicitly too, must not duplicate
+		ExpiresAt:  time.Now().Add(time.Hour),
+	})
+	if _, err := s.Login(ctx, &managementv1.LoginRequest{SetupKey: "grouped-key", WgPubKey: "pk-web"}); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	p, _ := st.GetPeer(ctx, "pk-web")
+	if len(p.Groups) != 2 {
+		t.Fatalf("expected Default + web with no duplicate, got %+v", p.Groups)
+	}
+	if p.Groups[0] != domain.DefaultGroupName || p.Groups[1] != "web" {
+		t.Fatalf("expected [Default web], got %+v", p.Groups)
+	}
+}
+
+func TestLoginReenrollPreservesGroups(t *testing.T) {
 	s, st := newTestServer(t)
 	ctx := context.Background()
 	first, _ := s.Login(ctx, &managementv1.LoginRequest{SetupKey: "seed-key", WgPubKey: "pk1"})
 
-	// Operator adds tags/routes out of band.
+	// Operator adds groups/routes out of band.
 	p, _ := st.GetPeer(ctx, "pk1")
-	p.Tags = []string{"prod"}
+	p.Groups = []string{domain.DefaultGroupName, "prod"}
 	p.AdvertisedRoutes = []string{"10.0.0.0/24"}
 	_ = st.SavePeer(ctx, p)
 
@@ -85,8 +108,8 @@ func TestLoginReenrollPreservesIPAndTags(t *testing.T) {
 		t.Fatalf("IP changed on re-enroll: %s -> %s", first.NetworkConfig.Address, second.NetworkConfig.Address)
 	}
 	after, _ := st.GetPeer(ctx, "pk1")
-	if len(after.Tags) != 1 || after.Tags[0] != "prod" {
-		t.Fatalf("tags lost on re-enroll: %+v", after.Tags)
+	if len(after.Groups) != 2 || after.Groups[1] != "prod" {
+		t.Fatalf("groups lost on re-enroll: %+v", after.Groups)
 	}
 	if len(after.AdvertisedRoutes) != 1 {
 		t.Fatalf("routes lost on re-enroll: %+v", after.AdvertisedRoutes)
@@ -127,14 +150,14 @@ func TestEphemeralKeyRejectedAfterUse(t *testing.T) {
 	}
 }
 
-func TestExpandTagRule(t *testing.T) {
-	tagIPs := map[string][]string{
+func TestExpandGroupRule(t *testing.T) {
+	groupIPs := map[string][]string{
 		"web": {"100.64.0.1", "100.64.0.2"},
 		"db":  {"100.64.0.9"},
 	}
-	// tag:web -> tag:db expands to 2x1 = 2 concrete rules.
-	r := &domain.Rule{ID: "r", Src: "tag:web", Dst: "tag:db", Action: "allow"}
-	out := expandTagRule(r, tagIPs)
+	// group:web -> group:db expands to 2x1 = 2 concrete rules.
+	r := &domain.Rule{ID: "r", Src: "group:web", Dst: "group:db", Action: "allow"}
+	out := expandGroupRule(r, groupIPs)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 expanded rules, got %d", len(out))
 	}
@@ -145,18 +168,18 @@ func TestExpandTagRule(t *testing.T) {
 	}
 }
 
-func TestExpandTagRuleEmptyTagDropsRule(t *testing.T) {
-	out := expandTagRule(&domain.Rule{Src: "tag:missing", Dst: "*"}, map[string][]string{})
+func TestExpandGroupRuleEmptyGroupDropsRule(t *testing.T) {
+	out := expandGroupRule(&domain.Rule{Src: "group:missing", Dst: "*"}, map[string][]string{})
 	if out != nil {
-		t.Fatalf("expected nil for unresolved tag, got %+v", out)
+		t.Fatalf("expected nil for unresolved group, got %+v", out)
 	}
 }
 
-func TestExpandTagRuleNoTagsPassthrough(t *testing.T) {
+func TestExpandGroupRuleNoGroupsPassthrough(t *testing.T) {
 	r := &domain.Rule{Src: "*", Dst: "10.0.0.0/24"}
-	out := expandTagRule(r, nil)
+	out := expandGroupRule(r, nil)
 	if len(out) != 1 || out[0] != r {
-		t.Fatal("non-tag rule should pass through unchanged")
+		t.Fatal("non-group rule should pass through unchanged")
 	}
 }
 

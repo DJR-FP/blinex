@@ -18,6 +18,7 @@ type Store struct {
 	mu        sync.RWMutex
 	accounts  map[string]*domain.Account
 	setupKeys map[string]*domain.SetupKey // keyed by SetupKey.Key (the secret token)
+	groups    map[string]*domain.Group    // keyed by Group.ID
 	peers     map[string]*domain.Peer     // keyed by WGPubKey
 	rules     map[string]*domain.Rule     // keyed by Rule.ID
 }
@@ -28,6 +29,7 @@ func New(seedKey string) *Store {
 	s := &Store{
 		accounts:  make(map[string]*domain.Account),
 		setupKeys: make(map[string]*domain.SetupKey),
+		groups:    make(map[string]*domain.Group),
 		peers:     make(map[string]*domain.Peer),
 		rules:     make(map[string]*domain.Rule),
 	}
@@ -45,6 +47,26 @@ func New(seedKey string) *Store {
 		Ephemeral: false,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(365 * 24 * time.Hour),
+	}
+	s.groups[accountID+"-default"] = &domain.Group{
+		ID:        accountID + "-default",
+		AccountID: accountID,
+		Name:      domain.DefaultGroupName,
+		CreatedAt: time.Now(),
+	}
+	// See postgres.Store.Seed: ACL enforcement is default-deny, so a fresh
+	// mesh needs a starting rule for Default members to reach each other.
+	s.rules[accountID+"-default-allow"] = &domain.Rule{
+		ID:        accountID + "-default-allow",
+		AccountID: accountID,
+		Name:      "Default allow",
+		Src:       "group:" + domain.DefaultGroupName,
+		Dst:       "group:" + domain.DefaultGroupName,
+		Protocol:  "all",
+		Action:    "allow",
+		Enabled:   true,
+		Priority:  1000,
+		CreatedAt: time.Now(),
 	}
 	return s
 }
@@ -115,6 +137,41 @@ func (s *Store) IncrementSetupKeyUsage(ctx context.Context, keyID string) error 
 		}
 	}
 	return fmt.Errorf("setup key id not found: %s", keyID)
+}
+
+func (s *Store) GetGroupsByAccount(_ context.Context, accountID string) ([]*domain.Group, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*domain.Group
+	for _, g := range s.groups {
+		if g.AccountID == accountID {
+			cp := *g
+			out = append(out, &cp)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (s *Store) CreateGroup(_ context.Context, g *domain.Group) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *g
+	s.groups[g.ID] = &cp
+	return nil
+}
+
+func (s *Store) DeleteGroup(_ context.Context, accountID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.groups[id]
+	if !ok || g.AccountID != accountID {
+		return fmt.Errorf("group not found")
+	}
+	delete(s.groups, id)
+	return nil
 }
 
 func (s *Store) GetPeer(ctx context.Context, wgPubKey string) (*domain.Peer, error) {

@@ -78,15 +78,20 @@ func TestStoreReturnsCopiesNotAliases(t *testing.T) {
 func TestRulesReturnedInPriorityOrder(t *testing.T) {
 	s := newStore()
 	ctx := context.Background()
+	// newStore seeds one "Default allow" rule at priority 1000 (see
+	// Store.New) — it must sort last, after these three lower-priority rules.
 	_ = s.SaveRule(ctx, &domain.Rule{ID: "a", AccountID: "default", Priority: 30})
 	_ = s.SaveRule(ctx, &domain.Rule{ID: "b", AccountID: "default", Priority: 10})
 	_ = s.SaveRule(ctx, &domain.Rule{ID: "c", AccountID: "default", Priority: 20})
 	rules, _ := s.GetRulesByAccount(ctx, "default")
-	if len(rules) != 3 {
-		t.Fatalf("expected 3 rules, got %d", len(rules))
+	if len(rules) != 4 {
+		t.Fatalf("expected 4 rules (3 + the seeded default-allow), got %d", len(rules))
 	}
 	if rules[0].ID != "b" || rules[1].ID != "c" || rules[2].ID != "a" {
-		t.Fatalf("rules not sorted by priority: %s,%s,%s", rules[0].ID, rules[1].ID, rules[2].ID)
+		t.Fatalf("rules not sorted by priority: %s,%s,%s,%s", rules[0].ID, rules[1].ID, rules[2].ID, rules[3].ID)
+	}
+	if rules[3].Name != "Default allow" {
+		t.Fatalf("expected the seeded default-allow rule last, got %+v", rules[3])
 	}
 }
 
@@ -100,6 +105,40 @@ func TestDeleteRuleAccountScoped(t *testing.T) {
 	}
 	if err := s.DeleteRule(ctx, "default", "r1"); err != nil {
 		t.Fatalf("same-account delete failed: %v", err)
+	}
+}
+
+func TestDefaultGroupSeeded(t *testing.T) {
+	s := newStore()
+	groups, err := s.GetGroupsByAccount(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("GetGroupsByAccount: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != domain.DefaultGroupName {
+		t.Fatalf("expected only the seeded Default group, got %+v", groups)
+	}
+}
+
+func TestCreateAndDeleteGroup(t *testing.T) {
+	s := newStore()
+	ctx := context.Background()
+	g := &domain.Group{ID: "g1", AccountID: "default", Name: "web"}
+	if err := s.CreateGroup(ctx, g); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	groups, _ := s.GetGroupsByAccount(ctx, "default")
+	if len(groups) != 2 {
+		t.Fatalf("expected Default + web, got %+v", groups)
+	}
+	if err := s.DeleteGroup(ctx, "default", "g1"); err != nil {
+		t.Fatalf("DeleteGroup: %v", err)
+	}
+	groups, _ = s.GetGroupsByAccount(ctx, "default")
+	if len(groups) != 1 {
+		t.Fatalf("expected only Default after delete, got %+v", groups)
+	}
+	if err := s.DeleteGroup(ctx, "other-account", "g1"); err == nil {
+		t.Fatal("expected cross-account delete to fail")
 	}
 }
 

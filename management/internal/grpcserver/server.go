@@ -99,6 +99,16 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		localIP = req.Meta.LocalIp
 	}
 
+	// Every peer is always in Default, regardless of enrollment path. A
+	// setup key can additionally drop a first-time enrollee straight into
+	// its own group(s), same as NetBird's auto-groups.
+	groups := []string{domain.DefaultGroupName}
+	for _, g := range sk.AutoGroups {
+		if g != domain.DefaultGroupName {
+			groups = append(groups, g)
+		}
+	}
+
 	peer := &domain.Peer{
 		ID:         uuid.NewString(),
 		AccountID:  sk.AccountID,
@@ -111,6 +121,7 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		Kernel:     kernel,
 		Version:    coreVersion,
 		DNSLabel:   toDNSLabel(hostname),
+		Groups:     groups,
 		AllowedIPs: []string{ip + "/32"},
 		LastSeen:   time.Now(),
 		CreatedAt:  time.Now(),
@@ -126,8 +137,10 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		// Re-enrollment: preserve the existing peer ID and IP.
 		peer.ID = existing.ID
 		peer.CreatedAt = existing.CreatedAt
-		// Preserve operator-managed fields that enrollment must not reset.
-		peer.Tags = existing.Tags
+		// Preserve operator-managed fields that enrollment must not reset —
+		// re-applying the setup key's auto-groups here would silently
+		// resurrect a group an operator deliberately removed the peer from.
+		peer.Groups = existing.Groups
 		peer.AdvertisedRoutes = existing.AdvertisedRoutes
 	}
 
@@ -250,11 +263,11 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 	var pbPeers []*commonv1.Peer
 	var routes []*commonv1.Route
 
-	// Build tag → IPs index for resolving tag-based rules.
-	tagIPs := make(map[string][]string)
+	// Build group → IPs index for resolving group-based rules.
+	groupIPs := make(map[string][]string)
 	for _, p := range peers {
-		for _, t := range p.Tags {
-			tagIPs[t] = append(tagIPs[t], p.IP)
+		for _, g := range p.Groups {
+			groupIPs[g] = append(groupIPs[g], p.IP)
 		}
 	}
 
@@ -289,7 +302,7 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 
 	var pbRules []*commonv1.Rule
 	for _, r := range domainRules {
-		expanded := expandTagRule(r, tagIPs)
+		expanded := expandGroupRule(r, groupIPs)
 		for _, er := range expanded {
 			pbRules = append(pbRules, &commonv1.Rule{
 				Id:       er.ID,
@@ -313,27 +326,27 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 	}
 }
 
-func expandTagRule(r *domain.Rule, tagIPs map[string][]string) []*domain.Rule {
-	srcTag := strings.TrimPrefix(r.Src, "tag:")
-	dstTag := strings.TrimPrefix(r.Dst, "tag:")
-	hasSrcTag := strings.HasPrefix(r.Src, "tag:")
-	hasDstTag := strings.HasPrefix(r.Dst, "tag:")
+func expandGroupRule(r *domain.Rule, groupIPs map[string][]string) []*domain.Rule {
+	srcGroup := strings.TrimPrefix(r.Src, "group:")
+	dstGroup := strings.TrimPrefix(r.Dst, "group:")
+	hasSrcGroup := strings.HasPrefix(r.Src, "group:")
+	hasDstGroup := strings.HasPrefix(r.Dst, "group:")
 
-	if !hasSrcTag && !hasDstTag {
+	if !hasSrcGroup && !hasDstGroup {
 		return []*domain.Rule{r}
 	}
 
 	srcIPs := []string{r.Src}
-	if hasSrcTag {
-		srcIPs = tagIPs[srcTag]
+	if hasSrcGroup {
+		srcIPs = groupIPs[srcGroup]
 		if len(srcIPs) == 0 {
 			return nil
 		}
 	}
 
 	dstIPs := []string{r.Dst}
-	if hasDstTag {
-		dstIPs = tagIPs[dstTag]
+	if hasDstGroup {
+		dstIPs = groupIPs[dstGroup]
 		if len(dstIPs) == 0 {
 			return nil
 		}

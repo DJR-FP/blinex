@@ -21,14 +21,15 @@ type account struct {
 }
 
 type setupKey struct {
-	ID        string `gorm:"primaryKey"`
-	AccountID string `gorm:"index"`
-	Key       string `gorm:"uniqueIndex"`
-	Name      string
-	Ephemeral bool
-	UsedCount int
-	ExpiresAt time.Time
-	CreatedAt time.Time
+	ID         string `gorm:"primaryKey"`
+	AccountID  string `gorm:"index"`
+	Key        string `gorm:"uniqueIndex"`
+	Name       string
+	Ephemeral  bool
+	UsedCount  int
+	AutoGroups string // comma-separated
+	ExpiresAt  time.Time
+	CreatedAt  time.Time
 }
 
 type peer struct {
@@ -44,12 +45,19 @@ type peer struct {
 	Kernel           string
 	Version          string
 	DNSLabel         string
-	Tags             string // comma-separated
+	Groups           string // comma-separated
 	AllowedIPs       string // comma-separated
 	AdvertisedRoutes string // comma-separated CIDRs
 	Connected        bool
 	LastSeen         time.Time
 	CreatedAt        time.Time
+}
+
+type group struct {
+	ID        string `gorm:"primaryKey"`
+	AccountID string `gorm:"index"`
+	Name      string
+	CreatedAt time.Time
 }
 
 type rule struct {
@@ -84,14 +92,24 @@ func New(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("connecting to postgres: %w", err)
 	}
 
-	if err := db.AutoMigrate(&account{}, &setupKey{}, &peer{}, &rule{}); err != nil {
+	// Pre-existing deployments have a peer.tags column from before the
+	// groups rename; carry its data over instead of silently orphaning it.
+	m := db.Migrator()
+	if m.HasColumn(&peer{}, "tags") && !m.HasColumn(&peer{}, "groups") {
+		if err := m.RenameColumn(&peer{}, "tags", "groups"); err != nil {
+			return nil, fmt.Errorf("migrating peer.tags -> peer.groups: %w", err)
+		}
+	}
+
+	if err := db.AutoMigrate(&account{}, &setupKey{}, &peer{}, &group{}, &rule{}); err != nil {
 		return nil, fmt.Errorf("auto-migrate: %w", err)
 	}
 
 	return &Store{db: db}, nil
 }
 
-// Seed inserts a default account and setup key if they don't already exist.
+// Seed inserts a default account, setup key, and the Default group if they
+// don't already exist.
 func (s *Store) Seed(accountID, key string) error {
 	a := &account{ID: accountID, Name: "Default", CreatedAt: time.Now()}
 	if err := s.db.FirstOrCreate(a, account{ID: accountID}).Error; err != nil {
@@ -105,7 +123,30 @@ func (s *Store) Seed(accountID, key string) error {
 		ExpiresAt: time.Now().Add(365 * 24 * time.Hour),
 		CreatedAt: time.Now(),
 	}
-	return s.db.FirstOrCreate(sk, setupKey{Key: key}).Error
+	if err := s.db.FirstOrCreate(sk, setupKey{Key: key}).Error; err != nil {
+		return err
+	}
+	g := &group{ID: accountID + "-default", AccountID: accountID, Name: domain.DefaultGroupName, CreatedAt: time.Now()}
+	if err := s.db.FirstOrCreate(g, group{AccountID: accountID, Name: domain.DefaultGroupName}).Error; err != nil {
+		return err
+	}
+	// A fresh mesh needs an out-of-box path for Default members to reach
+	// each other — ACL enforcement is default-deny, so with zero rules
+	// nothing can talk at all. Matches NetBird's own starting policy;
+	// delete or narrow this rule to tighten it.
+	defaultRule := &rule{
+		ID:        accountID + "-default-allow",
+		AccountID: accountID,
+		Name:      "Default allow",
+		Src:       "group:" + domain.DefaultGroupName,
+		Dst:       "group:" + domain.DefaultGroupName,
+		Protocol:  "all",
+		Action:    "allow",
+		Enabled:   true,
+		Priority:  1000,
+		CreatedAt: time.Now(),
+	}
+	return s.db.FirstOrCreate(defaultRule, rule{AccountID: accountID, Name: "Default allow"}).Error
 }
 
 func (s *Store) GetOrCreateAccount(_ context.Context, id string) (*domain.Account, error) {
@@ -130,13 +171,14 @@ func (s *Store) GetSetupKey(_ context.Context, key string) (*domain.SetupKey, er
 
 func (s *Store) CreateSetupKey(_ context.Context, dk *domain.SetupKey) error {
 	return s.db.Create(&setupKey{
-		ID:        dk.ID,
-		AccountID: dk.AccountID,
-		Key:       dk.Key,
-		Name:      dk.Name,
-		Ephemeral: dk.Ephemeral,
-		ExpiresAt: dk.ExpiresAt,
-		CreatedAt: dk.CreatedAt,
+		ID:         dk.ID,
+		AccountID:  dk.AccountID,
+		Key:        dk.Key,
+		Name:       dk.Name,
+		Ephemeral:  dk.Ephemeral,
+		AutoGroups: joinIPs(dk.AutoGroups),
+		ExpiresAt:  dk.ExpiresAt,
+		CreatedAt:  dk.CreatedAt,
 	}).Error
 }
 
@@ -166,6 +208,33 @@ func (s *Store) DeleteSetupKey(_ context.Context, accountID, id string) error {
 func (s *Store) IncrementSetupKeyUsage(_ context.Context, keyID string) error {
 	return s.db.Model(&setupKey{}).Where("id = ?", keyID).
 		UpdateColumn("used_count", gorm.Expr("used_count + 1")).Error
+}
+
+func (s *Store) GetGroupsByAccount(_ context.Context, accountID string) ([]*domain.Group, error) {
+	var rows []group
+	if err := s.db.Where("account_id = ?", accountID).Order("created_at asc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Group, len(rows))
+	for i, g := range rows {
+		out[i] = &domain.Group{ID: g.ID, AccountID: g.AccountID, Name: g.Name, CreatedAt: g.CreatedAt}
+	}
+	return out, nil
+}
+
+func (s *Store) CreateGroup(_ context.Context, dg *domain.Group) error {
+	return s.db.Create(&group{ID: dg.ID, AccountID: dg.AccountID, Name: dg.Name, CreatedAt: dg.CreatedAt}).Error
+}
+
+func (s *Store) DeleteGroup(_ context.Context, accountID, id string) error {
+	result := s.db.Where("id = ? AND account_id = ?", id, accountID).Delete(&group{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("group not found")
+	}
+	return nil
 }
 
 func (s *Store) GetPeer(_ context.Context, wgPubKey string) (*domain.Peer, error) {
@@ -214,7 +283,7 @@ func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 		Kernel:           dp.Kernel,
 		Version:          dp.Version,
 		DNSLabel:         dp.DNSLabel,
-		Tags:             joinIPs(dp.Tags),
+		Groups:           joinIPs(dp.Groups),
 		AllowedIPs:       joinIPs(dp.AllowedIPs),
 		AdvertisedRoutes: joinIPs(dp.AdvertisedRoutes),
 		Connected:        dp.Connected,
@@ -270,14 +339,15 @@ func (s *Store) DeleteRule(_ context.Context, accountID, id string) error {
 
 func toDomainSetupKey(sk *setupKey) *domain.SetupKey {
 	return &domain.SetupKey{
-		ID:        sk.ID,
-		AccountID: sk.AccountID,
-		Key:       sk.Key,
-		Name:      sk.Name,
-		Ephemeral: sk.Ephemeral,
-		UsedCount: sk.UsedCount,
-		ExpiresAt: sk.ExpiresAt,
-		CreatedAt: sk.CreatedAt,
+		ID:         sk.ID,
+		AccountID:  sk.AccountID,
+		Key:        sk.Key,
+		Name:       sk.Name,
+		Ephemeral:  sk.Ephemeral,
+		UsedCount:  sk.UsedCount,
+		AutoGroups: splitIPs(sk.AutoGroups),
+		ExpiresAt:  sk.ExpiresAt,
+		CreatedAt:  sk.CreatedAt,
 	}
 }
 
@@ -295,7 +365,7 @@ func toDomainPeer(p *peer) *domain.Peer {
 		Kernel:           p.Kernel,
 		Version:          p.Version,
 		DNSLabel:         p.DNSLabel,
-		Tags:             splitIPs(p.Tags),
+		Groups:           splitIPs(p.Groups),
 		AllowedIPs:       splitIPs(p.AllowedIPs),
 		AdvertisedRoutes: splitIPs(p.AdvertisedRoutes),
 		Connected:        p.Connected,

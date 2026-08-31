@@ -11,11 +11,19 @@ export interface Peer {
   os: string
   version: string
   dns_label: string
-  tags: string[]
+  groups: string[]
   connected: boolean
   last_seen: string
   created_at: string
   advertised_routes?: string[]
+}
+
+export interface Group {
+  id: string
+  account_id: string
+  name: string
+  created_at: string
+  peer_count: number
 }
 
 export interface Rule {
@@ -49,6 +57,7 @@ export interface SetupKey {
   key: string
   ephemeral: boolean
   used_count: number
+  auto_groups: string[]
   expires_at: string
   created_at: string
 }
@@ -73,7 +82,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   peers: {
     list: () => request<{ peers: Peer[] }>('/peers'),
-    update: (key: string, payload: { tags: string[] }) =>
+    update: (key: string, payload: { groups: string[] }) =>
       request<Peer>(`/peers/${encodeURIComponent(key)}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -86,12 +95,19 @@ export const api = {
         body: JSON.stringify({ routes }),
       }),
   },
-  tags: {
-    list: () => request<{ tags: string[] }>('/tags'),
+  groups: {
+    list: () => request<{ groups: Group[] }>('/groups'),
+    create: (payload: { name: string }) =>
+      request<{ group: Group }>('/groups', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    delete: (id: string) =>
+      request<void>(`/groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   setupKeys: {
     list: () => request<{ setup_keys: SetupKey[] }>('/setup-keys'),
-    create: (payload: { name: string; ephemeral?: boolean; expires_in_days?: number }) =>
+    create: (payload: { name: string; ephemeral?: boolean; expires_in_days?: number; auto_groups?: string[] }) =>
       request<{ setup_key: SetupKey }>('/setup-keys', {
         method: 'POST',
         body: JSON.stringify(payload),

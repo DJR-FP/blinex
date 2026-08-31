@@ -5,23 +5,25 @@ import type { Peer } from '@/lib/api'
 import { api } from '@/lib/api'
 import { clsx } from 'clsx'
 
+const DEFAULT_GROUP = 'Default'
+
 interface Props {
   peer: Peer
   onDelete: (key: string) => void
   onRoutesChange: (key: string, routes: string[]) => Promise<void>
-  onTagsChange: (key: string, tags: string[]) => Promise<void>
+  onGroupsChange: (key: string, groups: string[]) => Promise<void>
 }
 
-export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props) {
+export function PeerCard({ peer, onDelete, onRoutesChange, onGroupsChange }: Props) {
   const [showRoutes, setShowRoutes] = useState(false)
-  const [showTags, setShowTags] = useState(false)
+  const [showGroups, setShowGroups] = useState(false)
   const [newCIDR, setNewCIDR] = useState('')
-  const [newTag, setNewTag] = useState('')
+  const [newGroup, setNewGroup] = useState('')
   const [saving, setSaving] = useState(false)
   const [cidrError, setCIDRError] = useState('')
 
   const routes = peer.advertised_routes ?? []
-  const tags = peer.tags ?? []
+  const groups = peer.groups ?? []
   const isExitNode = routes.includes('0.0.0.0/0')
   const subnets = routes.filter(r => r !== '0.0.0.0/0')
 
@@ -51,22 +53,25 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
 
   const removeRoute = (cidr: string) => save(routes.filter(r => r !== cidr))
 
-  const addTag = async () => {
-    const tag = newTag.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
-    if (!tag || tags.includes(tag)) return
+  const addGroup = async () => {
+    const group = newGroup.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+    if (!group || groups.includes(group)) return
     setSaving(true)
     try {
-      await onTagsChange(peer.wg_pub_key, [...tags, tag])
+      await onGroupsChange(peer.wg_pub_key, [...groups, group])
     } finally {
       setSaving(false)
     }
-    setNewTag('')
+    setNewGroup('')
   }
 
-  const removeTag = async (tag: string) => {
+  // Default can't be removed here — the server re-adds it if a request
+  // omits it, so trying would just silently revert; the "Remove" control is
+  // hidden for it instead (see the modal below).
+  const removeGroup = async (group: string) => {
     setSaving(true)
     try {
-      await onTagsChange(peer.wg_pub_key, tags.filter(t => t !== tag))
+      await onGroupsChange(peer.wg_pub_key, groups.filter(g => g !== group))
     } finally {
       setSaving(false)
     }
@@ -105,11 +110,11 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
             </p>
           )}
           <p className="text-xs text-brand-500 mt-1">{peer.dns_label}.blinex</p>
-          {tags.length > 0 && (
+          {groups.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">
-              {tags.map(t => (
-                <span key={t} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                  {t}
+              {groups.map(g => (
+                <span key={g} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                  {g}
                 </span>
               ))}
             </div>
@@ -127,11 +132,11 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
 
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <button
-            onClick={() => setShowTags(true)}
+            onClick={() => setShowGroups(true)}
             className="text-xs text-gray-400 hover:text-brand-500 transition-colors px-1 py-0.5"
-            title="Manage tags"
+            title="Manage groups"
           >
-            Tags
+            Groups
           </button>
           <button
             onClick={() => setShowRoutes(true)}
@@ -150,47 +155,46 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
         </div>
       </div>
 
-      {showTags && (
+      {showGroups && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-1">
-              Tags — {peer.hostname || 'Unknown'}
+              Groups — {peer.hostname || 'Unknown'}
             </h2>
             <p className="text-sm text-gray-500 mb-5">
-              Tags are used in access rules to group devices (e.g. <code className="bg-gray-100 px-1 rounded text-xs">tag:servers</code>).
+              Groups are used in access rules to control what can reach what (e.g. <code className="bg-gray-100 px-1 rounded text-xs">group:servers</code>).
+              Every device is always in <span className="font-medium">{DEFAULT_GROUP}</span>.
             </p>
 
-            {tags.length === 0 ? (
-              <p className="text-xs text-gray-400 mb-3">No tags assigned.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {tags.map(t => (
-                  <span key={t} className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full text-sm font-medium">
-                    {t}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {groups.map(g => (
+                <span key={g} className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full text-sm font-medium">
+                  {g}
+                  {g !== DEFAULT_GROUP && (
                     <button
-                      onClick={() => removeTag(t)}
+                      onClick={() => removeGroup(g)}
                       disabled={saving}
                       className="text-blue-400 hover:text-red-500 transition-colors disabled:opacity-50"
                     >
                       ✕
                     </button>
-                  </span>
-                ))}
-              </div>
-            )}
+                  )}
+                </span>
+              ))}
+            </div>
 
             <div className="flex gap-2 mb-1">
               <input
                 type="text"
                 placeholder="e.g. servers, database, web"
-                value={newTag}
-                onChange={e => setNewTag(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addTag()}
+                value={newGroup}
+                onChange={e => setNewGroup(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addGroup()}
                 className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
               <button
-                onClick={addTag}
-                disabled={saving || !newTag.trim()}
+                onClick={addGroup}
+                disabled={saving || !newGroup.trim()}
                 className="bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-40 transition-colors flex-shrink-0"
               >
                 Add
@@ -198,7 +202,7 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
             </div>
 
             <button
-              onClick={() => setShowTags(false)}
+              onClick={() => setShowGroups(false)}
               className="w-full mt-4 border border-gray-200 text-gray-700 font-medium py-2 rounded-xl text-sm hover:bg-gray-50 transition-colors"
             >
               Done

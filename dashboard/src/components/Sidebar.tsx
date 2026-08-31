@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 
 const nav = [
   { label: 'Devices', href: '/dashboard', icon: '⬡' },
+  { label: 'Groups', href: '/dashboard/groups', icon: '◫' },
   { label: 'Setup Keys', href: '/dashboard/setup-keys', icon: '🔑' },
   { label: 'Access Rules', href: '/dashboard/acls', icon: '🛡' },
   { label: 'Settings', href: '/dashboard/settings', icon: '⚙' },

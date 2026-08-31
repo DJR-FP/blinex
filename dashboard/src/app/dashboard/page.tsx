@@ -46,9 +46,9 @@ export default function DevicesPage() {
     setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, advertised_routes: routes, ...resp.peer } : p))
   }
 
-  const handleTagsChange = async (key: string, tags: string[]) => {
-    const updated = await api.peers.update(key, { tags })
-    setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, tags: updated.tags } : p))
+  const handleGroupsChange = async (key: string, groups: string[]) => {
+    const updated = await api.peers.update(key, { groups })
+    setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, groups: updated.groups } : p))
   }
 
   const connected = peers.filter(p => p.connected).length
@@ -108,7 +108,7 @@ export default function DevicesPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {peers.map(p => (
-          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} onTagsChange={handleTagsChange} />
+          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} onGroupsChange={handleGroupsChange} />
         ))}
       </div>
     </div>

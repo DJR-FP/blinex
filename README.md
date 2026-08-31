@@ -15,7 +15,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 - **Stable IPs** — every device gets a permanent CGNAT IP (`100.64.x.x`) and a Magic DNS hostname (`device.blinex`)
 - **TLS encrypted control plane** — management and signal servers are TLS by default; self-signed cert generated automatically if none is provided
 - **Exit node / subnet routing** — advertise a LAN subnet or full exit node through any mesh device; toggle per device in the dashboard
-- **Tag-based access control** — group devices with tags (e.g. `tag:servers`, `tag:database`) and write ACL rules against groups; rules pushed to agents and enforced with iptables
+- **Group-based access control** — every device is always in `Default`; setup keys can drop new devices straight into other groups too. ACL rules match against groups (e.g. `group:servers`, `group:database`) and are deny-by-default — a fresh account is seeded with one `Default → Default, allow` rule so devices can reach each other out of the box, matching NetBird's own starting policy
 - **Admin login** — username/password dashboard access independent of any enrolled device; set `MGMT_ADMIN_PASSWORD` to enable
 - **Simple onboarding** — one `curl | bash` to enroll a device; JWT token appears in the dashboard
 - **Web dashboard** — manage devices, routes, access rules, and setup keys from a browser
@@ -33,7 +33,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 │   gRPC/TLS :50051             gRPC/TLS :10000       STUN/TURN         │
 │   HTTPS    :8080              · ICE signaling       UDP :3478         │
 │   JWT auth · REST API         · WireGuard packet    pion/turn         │
-│   peers · tags · ACLs           relay (DERP-style)  (direct-path      │
+│   peers · groups · ACLs         relay (DERP-style)  (direct-path      │
 │   PostgreSQL / in-memory                             NAT assist)      │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
@@ -59,7 +59,7 @@ A zero-trust WireGuard mesh VPN — open-source core, built for SMB and develope
 
 1. The agent enrolls with the **management server** (setup key → JWT + a stable
    `100.64.x.x` IP), then opens a long-lived gRPC **sync** stream for live peer,
-   tag, route, and ACL updates.
+   group, route, and ACL updates.
 2. For every other peer it opens a bidirectional **signal** stream. WireGuard
    packets are relayed peer-to-peer *through the signal server* (DERP-style) —
    this works behind any NAT with no port forwarding and is the always-on
@@ -636,7 +636,7 @@ The control plane enforces the following, verified by the automated test suite:
   relay accepts unauthenticated connections.
 - **Account isolation on enrollment.** A WireGuard public key already enrolled in
   one account cannot be re-enrolled into another (a public key is not a secret).
-  Re-enrollment preserves the peer's IP, tags, and advertised routes.
+  Re-enrollment preserves the peer's IP, groups, and advertised routes.
 - **Authorization.** REST write operations (peer/route/rule/setup-key mutations)
   require an `admin` JWT; reads are available to any authenticated peer. Every
   peer/rule/setup-key operation is scoped to the caller's account (no IDOR).
@@ -792,7 +792,6 @@ Version mismatch between agent and server. Make sure both are running the same v
 
 ### Next up
 - [ ] **OIDC / SSO login** — Google, GitHub OAuth2 as an alternative to setup key login
-- [ ] **ACL groups** — tag-based policy (e.g. `tag:servers`) instead of individual IPs
 - [ ] **ICE restart** — reconnect peers automatically on connection drop without agent restart
 
 ### Planned
@@ -801,6 +800,7 @@ Version mismatch between agent and server. Make sure both are running the same v
 - [ ] Kubernetes Helm chart
 
 ### Done ✅
+- [x] **Groups, replacing tags** — every device is always in `Default`, regardless of enrollment path or later reassignment; setup keys can now drop a first-time enrollee straight into additional groups (`auto_groups`) on top of Default. ACL rules match `group:<name>` (was `tag:<name>`) and are now **deny-by-default**: with zero rules, nothing can talk, even within the same group — matching NetBird's actual behavior once you look past its "All" group. A fresh account is seeded with one `group:Default → group:Default, allow` rule so an out-of-box mesh isn't cut off; delete or tighten it to lock things down. This flip applies to routed/exit-node traffic too, for free — ACL rules already governed forwarded traffic, so "who can reach a route this peer advertises" is just another rule, no separate route-visibility system needed. Enforced identically on kernel (iptables `BLINEX-ACL`) and netstack (`aclAllows`) peers. Dashboard: new Groups management page, group picker on setup-key creation, "Tags" renamed to "Groups" throughout. (v0.15.0)
 - [x] **Fixed: `blinex-agent status/peers/routes` never worked on Windows** — the control-socket path was hardcoded to the Unix-only `/var/run/blinex-agent.sock`; on Windows this resolved to a nonsensical path, `Serve()` failed to listen there, logged a warning, and the daemon carried on without a control socket at all (the main agent — enrollment, WireGuard, DNS — was never affected, only the local CLI). Socket path now resolves to `%ProgramData%\blinex\agent.sock` on Windows, and `Serve()` creates the parent directory first (it also didn't exist on a fresh install, which broke even the corrected path until this was added). Found and verified live during first real-world Windows testing. (v0.14.3)
 - [x] **Fixed: double-v peer version display** — the dashboard always rendered `v{peer.version}`, but agent binaries built by different pipelines embed the version inconsistently (release-agent.yml strips the git tag's `v`; other builds keep it), so a peer running one of the latter showed `vv0.13.1`. The card now strips any leading `v` before adding its own. (v0.14.2)
 - [x] **Fixed: agent version not reaching peer record** — `Login` built the peer's hostname/OS/local-IP from the reported meta but silently dropped `Kernel`/`CoreVersion` (only `UpdatePeerMeta` set them, and the agent never actually calls that RPC), so `GET /peers` and the dashboard always showed a blank version even though the agent reported one correctly. Login now sets both fields. (v0.14.1)

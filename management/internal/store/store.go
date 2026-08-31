@@ -19,6 +19,11 @@ type Store interface {
 	DeleteSetupKey(ctx context.Context, accountID, id string) error
 	IncrementSetupKeyUsage(ctx context.Context, keyID string) error
 
+	// Groups
+	GetGroupsByAccount(ctx context.Context, accountID string) ([]*domain.Group, error)
+	CreateGroup(ctx context.Context, g *domain.Group) error
+	DeleteGroup(ctx context.Context, accountID, id string) error
+
 	// Peers
 	GetPeer(ctx context.Context, wgPubKey string) (*domain.Peer, error)
 	GetPeersByAccount(ctx context.Context, accountID string) ([]*domain.Peer, error)

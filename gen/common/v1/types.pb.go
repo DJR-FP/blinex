@@ -481,8 +481,8 @@ type Rule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Src           string                 `protobuf:"bytes,3,opt,name=src,proto3" json:"src,omitempty"`           // source: CIDR, peer IP, "tag:<name>", or "*"
-	Dst           string                 `protobuf:"bytes,4,opt,name=dst,proto3" json:"dst,omitempty"`           // destination: CIDR, peer IP, "tag:<name>", or "*"
+	Src           string                 `protobuf:"bytes,3,opt,name=src,proto3" json:"src,omitempty"`           // source: CIDR, peer IP, "group:<name>", or "*" (already expanded to concrete IPs by the time this reaches an agent)
+	Dst           string                 `protobuf:"bytes,4,opt,name=dst,proto3" json:"dst,omitempty"`           // destination: CIDR, peer IP, "group:<name>", or "*" (already expanded to concrete IPs by the time this reaches an agent)
 	Protocol      string                 `protobuf:"bytes,5,opt,name=protocol,proto3" json:"protocol,omitempty"` // "tcp", "udp", "icmp", "all"
 	Port          int32                  `protobuf:"varint,6,opt,name=port,proto3" json:"port,omitempty"`        // destination port; 0 = any
 	Action        string                 `protobuf:"bytes,7,opt,name=action,proto3" json:"action,omitempty"`     // "allow" or "deny"

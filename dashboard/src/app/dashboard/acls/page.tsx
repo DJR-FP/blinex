@@ -16,32 +16,32 @@ const emptyForm = (): RulePayload => ({
   priority: 100,
 })
 
-function TagOrIPInput({
+function GroupOrIPInput({
   label,
   value,
   onChange,
-  tags,
+  groups,
   placeholder,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
-  tags: string[]
+  groups: string[]
   placeholder: string
 }) {
-  const mode = value === '*' ? 'any' : value.startsWith('tag:') ? 'tag' : 'ip'
+  const mode = value === '*' ? 'any' : value.startsWith('group:') ? 'group' : 'ip'
 
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       <div className="flex gap-1 mb-1.5">
-        {(['any', 'tag', 'ip'] as const).map(m => (
+        {(['any', 'group', 'ip'] as const).map(m => (
           <button
             key={m}
             type="button"
             onClick={() => {
               if (m === 'any') onChange('*')
-              else if (m === 'tag') onChange(tags.length > 0 ? `tag:${tags[0]}` : 'tag:')
+              else if (m === 'group') onChange(groups.length > 0 ? `group:${groups[0]}` : 'group:')
               else onChange('')
             }}
             className={`px-2 py-0.5 text-xs rounded font-medium transition-colors ${
@@ -50,19 +50,19 @@ function TagOrIPInput({
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            {m === 'any' ? 'Any' : m === 'tag' ? 'Tag' : 'IP/CIDR'}
+            {m === 'any' ? 'Any' : m === 'group' ? 'Group' : 'IP/CIDR'}
           </button>
         ))}
       </div>
-      {mode === 'tag' ? (
+      {mode === 'group' ? (
         <select
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          value={value.replace('tag:', '')}
-          onChange={e => onChange(`tag:${e.target.value}`)}
+          value={value.replace('group:', '')}
+          onChange={e => onChange(`group:${e.target.value}`)}
         >
-          {tags.length === 0 && <option value="">No tags defined</option>}
-          {tags.map(t => (
-            <option key={t} value={t}>{t}</option>
+          {groups.length === 0 && <option value="">No groups defined</option>}
+          {groups.map(g => (
+            <option key={g} value={g}>{g}</option>
           ))}
         </select>
       ) : mode === 'ip' ? (
@@ -79,12 +79,12 @@ function TagOrIPInput({
 
 function RuleModal({
   initial,
-  tags,
+  groups,
   onSave,
   onClose,
 }: {
   initial?: Rule
-  tags: string[]
+  groups: string[]
   onSave: (p: RulePayload) => Promise<void>
   onClose: () => void
 }) {
@@ -139,18 +139,18 @@ function RuleModal({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <TagOrIPInput
+            <GroupOrIPInput
               label="Source"
               value={form.src}
               onChange={v => set('src', v)}
-              tags={tags}
+              groups={groups}
               placeholder="100.64.0.1 or CIDR"
             />
-            <TagOrIPInput
+            <GroupOrIPInput
               label="Destination"
               value={form.dst}
               onChange={v => set('dst', v)}
-              tags={tags}
+              groups={groups}
               placeholder="100.64.0.2 or CIDR"
             />
           </div>
@@ -244,7 +244,7 @@ function RuleModal({
 }
 
 function formatSrcDst(val: string) {
-  if (val.startsWith('tag:')) {
+  if (val.startsWith('group:')) {
     return (
       <span className="inline-flex items-center gap-1">
         <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium">
@@ -258,19 +258,19 @@ function formatSrcDst(val: string) {
 
 export default function ACLsPage() {
   const [rules, setRules] = useState<Rule[]>([])
-  const [tags, setTags] = useState<string[]>([])
+  const [groups, setGroups] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modal, setModal] = useState<{ open: boolean; editing?: Rule }>({ open: false })
 
   const fetchData = useCallback(async () => {
     try {
-      const [rulesData, tagsData] = await Promise.all([
+      const [rulesData, groupsData] = await Promise.all([
         api.rules.list(),
-        api.tags.list(),
+        api.groups.list(),
       ])
       setRules(rulesData.rules ?? [])
-      setTags(tagsData.tags ?? [])
+      setGroups((groupsData.groups ?? []).map(g => g.name))
     } catch (err) {
       setError(String(err))
     } finally {
@@ -316,7 +316,7 @@ export default function ACLsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Access Rules</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Control which devices can communicate. Use tags (e.g. <code className="text-xs bg-gray-100 px-1 rounded">tag:servers</code>) or IPs. Rules evaluated in priority order.
+            Control which devices can communicate. Use groups (e.g. <code className="text-xs bg-gray-100 px-1 rounded">group:servers</code>) or IPs. Nothing can talk without an allow rule — rules evaluated in priority order.
           </p>
         </div>
         <button
@@ -337,9 +337,10 @@ export default function ACLsPage() {
         <div className="text-center text-gray-400 py-12">Loading…</div>
       ) : sortedRules.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
-          <p className="font-medium text-gray-700">Default policy: allow all</p>
+          <p className="font-medium text-gray-700">Default policy: deny all</p>
           <p className="text-sm mt-1">
-            All enrolled devices can reach each other. Add rules with tags to restrict access.
+            No rules exist, so no traffic is allowed anywhere — not even within a group. Add an allow
+            rule (e.g. <code className="text-xs bg-gray-100 px-1 rounded">group:Default → group:Default</code>) to let devices reach each other.
           </p>
         </div>
       ) : (
@@ -434,7 +435,7 @@ export default function ACLsPage() {
       {modal.open && (
         <RuleModal
           initial={modal.editing}
-          tags={tags}
+          groups={groups}
           onSave={handleSave}
           onClose={() => setModal({ open: false })}
         />

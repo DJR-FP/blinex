@@ -43,23 +43,23 @@ func peerToken(a *auth.Manager) string  { t, _ := a.IssueToken("p", "k", "defaul
 
 // ---- validation helpers ----
 
-func TestIsValidTag(t *testing.T) {
-	good := []string{"prod", "web-1", "a_b", "x"}
-	bad := []string{"", "-lead", "UPPER", "has space", "sym!"}
+func TestIsValidGroupName(t *testing.T) {
+	good := []string{"prod", "web-1", "a_b", "x", "UPPER", "Default"}
+	bad := []string{"", "-lead", "has space", "sym!"}
 	for _, g := range good {
-		if !isValidTag(g) {
+		if !isValidGroupName(g) {
 			t.Errorf("expected %q valid", g)
 		}
 	}
 	for _, b := range bad {
-		if isValidTag(b) {
+		if isValidGroupName(b) {
 			t.Errorf("expected %q invalid", b)
 		}
 	}
 }
 
 func TestValidateRuleFields(t *testing.T) {
-	if err := validateRuleFields("*", "tag:web", "tcp", 80); err != nil {
+	if err := validateRuleFields("*", "group:web", "tcp", 80); err != nil {
 		t.Errorf("valid rule rejected: %v", err)
 	}
 	if err := validateRuleFields("10.0.0.0/24", "1.2.3.4", "all", 0); err != nil {
@@ -74,8 +74,8 @@ func TestValidateRuleFields(t *testing.T) {
 	if err := validateRuleFields("*", "*", "tcp", 99999); err == nil {
 		t.Error("expected out-of-range port to fail")
 	}
-	if err := validateRuleFields("tag:", "*", "tcp", 0); err == nil {
-		t.Error("expected empty tag name to fail")
+	if err := validateRuleFields("group:", "*", "tcp", 0); err == nil {
+		t.Error("expected empty group name to fail")
 	}
 }
 
@@ -156,18 +156,39 @@ func TestAdminLoginDisabledWhenNoPassword(t *testing.T) {
 func TestUpdatePeerRejectsCrossAccount(t *testing.T) {
 	s, st, a := newTestServer()
 	_ = st.SavePeer(nil, &domain.Peer{ID: "1", AccountID: "other", WGPubKey: "k-other"})
-	rec := do(s, "PUT", "/api/v1/peers/k-other", adminToken(a), map[string]any{"tags": []string{"x"}})
+	rec := do(s, "PUT", "/api/v1/peers/k-other", adminToken(a), map[string]any{"groups": []string{"x"}})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for cross-account update, got %d", rec.Code)
 	}
 }
 
-func TestUpdatePeerValidatesTags(t *testing.T) {
+func TestUpdatePeerValidatesGroups(t *testing.T) {
 	s, st, a := newTestServer()
 	_ = st.SavePeer(nil, &domain.Peer{ID: "1", AccountID: "default", WGPubKey: "k1"})
-	rec := do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{"tags": []string{"BAD TAG"}})
+	rec := do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{"groups": []string{"BAD GROUP"}})
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid tag, got %d", rec.Code)
+		t.Fatalf("expected 400 for invalid group, got %d", rec.Code)
+	}
+}
+
+// A peer can never lose Default membership through this endpoint, even if
+// the request omits it — the dashboard (or any other caller) can't remove it.
+func TestUpdatePeerAlwaysKeepsDefaultGroup(t *testing.T) {
+	s, st, a := newTestServer()
+	_ = st.SavePeer(nil, &domain.Peer{ID: "1", AccountID: "default", WGPubKey: "k1", Groups: []string{domain.DefaultGroupName}})
+	rec := do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{"groups": []string{"web"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	p, _ := st.GetPeer(nil, "k1")
+	found := false
+	for _, g := range p.Groups {
+		if g == domain.DefaultGroupName {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Default must always be present, got %+v", p.Groups)
 	}
 }
 
@@ -227,10 +248,94 @@ func TestCreateRuleValidationAndSuccess(t *testing.T) {
 		t.Fatalf("expected 400 for bad action, got %d", bad.Code)
 	}
 	ok := do(s, "POST", "/api/v1/rules", adminToken(a), map[string]any{
-		"name": "r", "src": "*", "dst": "tag:web", "protocol": "tcp", "port": 443, "action": "allow", "enabled": true,
+		"name": "r", "src": "*", "dst": "group:web", "protocol": "tcp", "port": 443, "action": "allow", "enabled": true,
 	})
 	if ok.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d (%s)", ok.Code, ok.Body.String())
+	}
+}
+
+// ---- groups ----
+
+func TestGroupsSeededWithDefault(t *testing.T) {
+	s, _, a := newTestServer()
+	rec := do(s, "GET", "/api/v1/groups", peerToken(a), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Groups []struct {
+			Name string `json:"name"`
+		} `json:"groups"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Groups) != 1 || body.Groups[0].Name != domain.DefaultGroupName {
+		t.Fatalf("expected only the seeded Default group, got %+v", body.Groups)
+	}
+}
+
+func TestCreateAndDeleteGroup(t *testing.T) {
+	s, _, a := newTestServer()
+	create := do(s, "POST", "/api/v1/groups", adminToken(a), map[string]any{"name": "web"})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", create.Code, create.Body.String())
+	}
+	var body struct {
+		Group domain.Group `json:"group"`
+	}
+	_ = json.Unmarshal(create.Body.Bytes(), &body)
+	if body.Group.ID == "" {
+		t.Fatal("no id returned")
+	}
+	// Duplicate name rejected.
+	dup := do(s, "POST", "/api/v1/groups", adminToken(a), map[string]any{"name": "web"})
+	if dup.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate group name, got %d", dup.Code)
+	}
+	del := do(s, "DELETE", "/api/v1/groups/"+body.Group.ID, adminToken(a), nil)
+	if del.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 on delete, got %d", del.Code)
+	}
+}
+
+func TestDeleteDefaultGroupRejected(t *testing.T) {
+	s, st, a := newTestServer()
+	groups, _ := st.GetGroupsByAccount(nil, "default")
+	var defaultID string
+	for _, g := range groups {
+		if g.Name == domain.DefaultGroupName {
+			defaultID = g.ID
+		}
+	}
+	if defaultID == "" {
+		t.Fatal("seeded Default group not found")
+	}
+	rec := do(s, "DELETE", "/api/v1/groups/"+defaultID, adminToken(a), nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 rejecting deletion of Default, got %d", rec.Code)
+	}
+}
+
+func TestCreateSetupKeyWithAutoGroups(t *testing.T) {
+	s, _, a := newTestServer()
+	create := do(s, "POST", "/api/v1/setup-keys", adminToken(a), map[string]any{
+		"name": "eng", "auto_groups": []string{"web", "prod"},
+	})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", create.Code, create.Body.String())
+	}
+	var body struct {
+		SetupKey domain.SetupKey `json:"setup_key"`
+	}
+	_ = json.Unmarshal(create.Body.Bytes(), &body)
+	if len(body.SetupKey.AutoGroups) != 2 {
+		t.Fatalf("expected 2 auto_groups, got %+v", body.SetupKey.AutoGroups)
+	}
+	bad := do(s, "POST", "/api/v1/setup-keys", adminToken(a), map[string]any{
+		"name": "eng2", "auto_groups": []string{"has space"},
+	})
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid auto_group name, got %d", bad.Code)
 	}
 }
 

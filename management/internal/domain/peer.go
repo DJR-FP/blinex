@@ -15,7 +15,7 @@ type Peer struct {
 	Kernel           string    `json:"kernel"`
 	Version          string    `json:"version"` // agent version reported via PeerMeta
 	DNSLabel         string    `json:"dns_label"`
-	Tags             []string  `json:"tags"`
+	Groups           []string  `json:"groups"`
 	AllowedIPs       []string  `json:"allowed_ips"`
 	AdvertisedRoutes []string  `json:"advertised_routes"` // CIDRs this peer advertises to the mesh
 	Connected        bool      `json:"connected"`

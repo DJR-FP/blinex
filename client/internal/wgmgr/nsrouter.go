@@ -199,9 +199,11 @@ func (n *RoutingNet) SetACLRules(rules []*commonv1.Rule) {
 
 // aclAllows evaluates the ACL policy for a connection this router is about to
 // forward: src (mesh sender) → dst:dport over proto. Rules arrive already
-// priority-ordered and tag-expanded to concrete src/dst CIDRs; the first match
-// wins and the default (no match) is allow — mirroring the iptables BLINEX-ACL
-// chain kernel peers use, so netstack and kernel routers enforce the same policy.
+// priority-ordered and group-expanded to concrete src/dst CIDRs; the first
+// match wins and the default (no match) is deny — mirroring the iptables
+// BLINEX-ACL chain kernel peers use, so netstack and kernel routers enforce
+// the same policy. A fresh account is seeded with a Default↔Default allow
+// rule, so an unconfigured mesh isn't cut off by this (see domain.Rule).
 func (n *RoutingNet) aclAllows(src, dst netip.Addr, proto string, dport uint16) bool {
 	n.mu.RLock()
 	rules := n.aclRules
@@ -223,12 +225,12 @@ func (n *RoutingNet) aclAllows(src, dst netip.Addr, proto string, dport uint16) 
 		}
 		return r.Action == "allow"
 	}
-	return true // deny-by-exception: default allow
+	return false // default deny
 }
 
 // aclHostMatch reports whether ip matches an ACL src/dst field: "" or "*" is any,
-// otherwise a concrete IP or CIDR (post tag-expansion). An unparseable field
-// (e.g. an unexpanded "tag:...") never matches, so it can't accidentally allow.
+// otherwise a concrete IP or CIDR (post group-expansion). An unparseable field
+// (e.g. an unexpanded "group:...") never matches, so it can't accidentally allow.
 func aclHostMatch(field string, ip netip.Addr) bool {
 	if field == "" || field == "*" {
 		return true
