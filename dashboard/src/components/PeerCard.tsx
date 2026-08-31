@@ -85,7 +85,9 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onTagsChange }: Props
             <p className="font-semibold text-gray-900 truncate">{peer.hostname || 'Unknown'}</p>
             <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{peer.os}</span>
             {peer.version && (
-              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono">v{peer.version}</span>
+              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono">
+                v{peer.version.replace(/^v/i, '')}
+              </span>
             )}
             {isExitNode && (
               <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">
