@@ -105,6 +105,38 @@ func New(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("auto-migrate: %w", err)
 	}
 
+	// Every peer is always in Default (see domain.DefaultGroupName) — but
+	// Login only guarantees that for a *new* enrollment, and re-enrollment
+	// deliberately preserves an existing peer's groups as-is rather than
+	// re-adding it. A peer that existed before groups did (migrated from
+	// peer.tags above, or from any earlier version) would otherwise sit
+	// there missing Default forever unless something happens to touch its
+	// groups later — and since ACL enforcement is default-deny seeded only
+	// with a Default->Default allow, that peer would be unreachable from
+	// (and unable to reach) anything, silently, until someone noticed. Exact
+	// membership check in Go, not a SQL LIKE — a group literally named e.g.
+	// "DefaultTeam" would false-positive a substring match.
+	var allPeers []peer
+	if err := db.Find(&allPeers).Error; err != nil {
+		return nil, fmt.Errorf("listing peers for Default-group backfill: %w", err)
+	}
+	for _, p := range allPeers {
+		hasDefault := false
+		for _, g := range splitIPs(p.Groups) {
+			if g == domain.DefaultGroupName {
+				hasDefault = true
+				break
+			}
+		}
+		if hasDefault {
+			continue
+		}
+		newGroups := append([]string{domain.DefaultGroupName}, splitIPs(p.Groups)...)
+		if err := db.Model(&peer{}).Where("id = ?", p.ID).Update("groups", joinIPs(newGroups)).Error; err != nil {
+			return nil, fmt.Errorf("backfilling Default group onto peer %s: %w", p.ID, err)
+		}
+	}
+
 	return &Store{db: db}, nil
 }
 
