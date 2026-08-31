@@ -88,10 +88,14 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 
 	hostname := ""
 	os := ""
+	kernel := ""
+	coreVersion := ""
 	localIP := ""
 	if req.Meta != nil {
 		hostname = req.Meta.Hostname
 		os = req.Meta.Os
+		kernel = req.Meta.Kernel
+		coreVersion = req.Meta.CoreVersion
 		localIP = req.Meta.LocalIp
 	}
 
@@ -104,6 +108,8 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		PublicIP:   peerIP,
 		Hostname:   hostname,
 		OS:         os,
+		Kernel:     kernel,
+		Version:    coreVersion,
 		DNSLabel:   toDNSLabel(hostname),
 		AllowedIPs: []string{ip + "/32"},
 		LastSeen:   time.Now(),
