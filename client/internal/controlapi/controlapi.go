@@ -10,11 +10,27 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
 // DefaultSocket is where the daemon listens and the CLI connects by default.
-const DefaultSocket = "/var/run/blinex-agent.sock"
+// "/var/run/..." is a Unix-only path convention — Windows has no /var/run, and
+// a leading "/" resolves relative to the current drive there, so a Windows
+// agent would listen somewhere nonsensical and the CLI could never find it.
+var DefaultSocket = defaultSocketPath()
+
+func defaultSocketPath() string {
+	if runtime.GOOS != "windows" {
+		return "/var/run/blinex-agent.sock"
+	}
+	programData := os.Getenv("ProgramData")
+	if programData == "" {
+		programData = `C:\ProgramData`
+	}
+	return filepath.Join(programData, "blinex", "agent.sock")
+}
 
 // Status is the full snapshot returned by the daemon.
 type Status struct {
@@ -50,6 +66,11 @@ type RouteInfo struct {
 func Serve(socketPath string, provider func() Status) (func(), error) {
 	if socketPath == "" {
 		socketPath = DefaultSocket
+	}
+	if dir := filepath.Dir(socketPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("creating socket dir %s: %w", dir, err)
+		}
 	}
 	_ = os.Remove(socketPath) // clear a stale socket from a previous run
 	ln, err := net.Listen("unix", socketPath)
