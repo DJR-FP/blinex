@@ -137,3 +137,63 @@ func TestConcurrentQueriesNoCorruption(t *testing.T) {
 		}
 	}
 }
+
+func TestBlockedDomainReturnsNXDOMAIN(t *testing.T) {
+	r := startResolver(t)
+	r.SetBlocklist([]string{"evil.example"})
+	resp := queryA(t, r.listenAddr, "evil.example.")
+	if resp.Header.RCode != dnsmessage.RCodeNameError {
+		t.Fatalf("expected NXDOMAIN, got RCode %v", resp.Header.RCode)
+	}
+	if len(resp.Answers) != 0 {
+		t.Fatalf("expected no answers for a blocked domain, got %d", len(resp.Answers))
+	}
+}
+
+func TestBlockedDomainBlocksSubdomains(t *testing.T) {
+	r := startResolver(t)
+	r.SetBlocklist([]string{"evil.example"})
+	resp := queryA(t, r.listenAddr, "c2.evil.example.")
+	if resp.Header.RCode != dnsmessage.RCodeNameError {
+		t.Fatalf("expected subdomain of a blocked domain to be NXDOMAIN, got RCode %v", resp.Header.RCode)
+	}
+}
+
+func TestBlocklistIsCaseInsensitive(t *testing.T) {
+	r := startResolver(t)
+	r.SetBlocklist([]string{"Evil.Example"})
+	resp := queryA(t, r.listenAddr, "EVIL.EXAMPLE.")
+	if resp.Header.RCode != dnsmessage.RCodeNameError {
+		t.Fatalf("expected case-insensitive block, got RCode %v", resp.Header.RCode)
+	}
+}
+
+// TestBlocklistDoesNotShadowMeshRecords guards the ordering in handle(): a
+// mesh record must resolve normally even while an unrelated domain is
+// blocked — mesh records are always checked first.
+func TestBlocklistDoesNotShadowMeshRecords(t *testing.T) {
+	r := startResolver(t)
+	r.Upsert("laptop", "100.64.0.7")
+	r.SetBlocklist([]string{"evil.example"})
+	resp := queryA(t, r.listenAddr, "laptop.blinex.")
+	if len(resp.Answers) != 1 {
+		t.Fatalf("expected mesh record to resolve normally, got %d answers", len(resp.Answers))
+	}
+}
+
+// TestSetBlocklistReplacesWholesale mirrors the netstack router's
+// SetACLRules contract: each call fully replaces the previous list rather
+// than merging into it.
+func TestSetBlocklistReplacesWholesale(t *testing.T) {
+	r := startResolver(t)
+	r.SetBlocklist([]string{"first.example"})
+	r.SetBlocklist([]string{"second.example"})
+
+	resp := queryA(t, r.listenAddr, "second.example.")
+	if resp.Header.RCode != dnsmessage.RCodeNameError {
+		t.Fatalf("expected second.example to be blocked, got RCode %v", resp.Header.RCode)
+	}
+	if r.isBlocked("first.example.") {
+		t.Fatal("first.example should no longer be blocked after SetBlocklist replaced the list")
+	}
+}

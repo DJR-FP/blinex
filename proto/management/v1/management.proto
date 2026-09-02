@@ -19,6 +19,12 @@ service ManagementService {
 
   // Called by the agent after OS/version changes.
   rpc UpdatePeerMeta(UpdatePeerMetaRequest) returns (UpdatePeerMetaResponse);
+
+  // Polled periodically by the agent (not pushed via Sync — the compiled
+  // threat-intel feed can run into the tens of thousands of domains, far
+  // too large to bundle into every peer/rule update). known_version lets
+  // the agent skip re-downloading an unchanged list.
+  rpc GetBlocklist(GetBlocklistRequest) returns (GetBlocklistResponse);
 }
 
 message GetServerKeyRequest {}
@@ -58,3 +64,14 @@ message UpdatePeerMetaRequest {
 }
 
 message UpdatePeerMetaResponse {}
+
+message GetBlocklistRequest {
+  string wg_pub_key    = 1;
+  string known_version = 2; // client's cached version; empty on first call
+}
+
+message GetBlocklistResponse {
+  string          version      = 1;
+  bool            not_modified = 2; // true when known_version is still current; domains omitted
+  repeated string domains      = 3; // malicious/C2 domains to block via NXDOMAIN
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -11,6 +12,7 @@ import (
 
 	managementv1 "github.com/blinex/gen/management/v1"
 	"github.com/blinex/management/internal/auth"
+	"github.com/blinex/management/internal/blocklist"
 	"github.com/blinex/management/internal/config"
 	"github.com/blinex/management/internal/grpcserver"
 	"github.com/blinex/management/internal/httpserver"
@@ -71,7 +73,15 @@ func main() {
 		log.Info().Int("peers", len(allPeers)).Msg("IPAM restored from existing peers")
 	}
 
-	grpcSrv := grpcserver.New(st, authMgr, ipam, cfg.NetworkCIDR, cfg.DNSSuffix)
+	blocklistRefresh, err := time.ParseDuration(cfg.BlocklistRefresh)
+	if err != nil {
+		log.Warn().Err(err).Str("value", cfg.BlocklistRefresh).Msg("invalid MGMT_BLOCKLIST_REFRESH, defaulting to 6h")
+		blocklistRefresh = 6 * time.Hour
+	}
+	blocklistStore := blocklist.NewStore()
+	go blocklistStore.Run(context.Background(), cfg.BlocklistURL, blocklistRefresh)
+
+	grpcSrv := grpcserver.New(st, authMgr, ipam, cfg.NetworkCIDR, cfg.DNSSuffix, blocklistStore)
 	httpSrv := httpserver.New(st, authMgr, grpcSrv.NotifyAccount, grpcSrv.ConnectedKeys, grpcSrv.ReleaseIP, version, cfg.AdminUser, cfg.AdminPassword)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)

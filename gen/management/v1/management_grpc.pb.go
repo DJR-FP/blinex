@@ -23,6 +23,7 @@ const (
 	ManagementService_Login_FullMethodName          = "/management.v1.ManagementService/Login"
 	ManagementService_Sync_FullMethodName           = "/management.v1.ManagementService/Sync"
 	ManagementService_UpdatePeerMeta_FullMethodName = "/management.v1.ManagementService/UpdatePeerMeta"
+	ManagementService_GetBlocklist_FullMethodName   = "/management.v1.ManagementService/GetBlocklist"
 )
 
 // ManagementServiceClient is the client API for ManagementService service.
@@ -38,6 +39,11 @@ type ManagementServiceClient interface {
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error)
 	// Called by the agent after OS/version changes.
 	UpdatePeerMeta(ctx context.Context, in *UpdatePeerMetaRequest, opts ...grpc.CallOption) (*UpdatePeerMetaResponse, error)
+	// Polled periodically by the agent (not pushed via Sync — the compiled
+	// threat-intel feed can run into the tens of thousands of domains, far
+	// too large to bundle into every peer/rule update). known_version lets
+	// the agent skip re-downloading an unchanged list.
+	GetBlocklist(ctx context.Context, in *GetBlocklistRequest, opts ...grpc.CallOption) (*GetBlocklistResponse, error)
 }
 
 type managementServiceClient struct {
@@ -97,6 +103,16 @@ func (c *managementServiceClient) UpdatePeerMeta(ctx context.Context, in *Update
 	return out, nil
 }
 
+func (c *managementServiceClient) GetBlocklist(ctx context.Context, in *GetBlocklistRequest, opts ...grpc.CallOption) (*GetBlocklistResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBlocklistResponse)
+	err := c.cc.Invoke(ctx, ManagementService_GetBlocklist_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagementServiceServer is the server API for ManagementService service.
 // All implementations must embed UnimplementedManagementServiceServer
 // for forward compatibility.
@@ -110,6 +126,11 @@ type ManagementServiceServer interface {
 	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error
 	// Called by the agent after OS/version changes.
 	UpdatePeerMeta(context.Context, *UpdatePeerMetaRequest) (*UpdatePeerMetaResponse, error)
+	// Polled periodically by the agent (not pushed via Sync — the compiled
+	// threat-intel feed can run into the tens of thousands of domains, far
+	// too large to bundle into every peer/rule update). known_version lets
+	// the agent skip re-downloading an unchanged list.
+	GetBlocklist(context.Context, *GetBlocklistRequest) (*GetBlocklistResponse, error)
 	mustEmbedUnimplementedManagementServiceServer()
 }
 
@@ -131,6 +152,9 @@ func (UnimplementedManagementServiceServer) Sync(*SyncRequest, grpc.ServerStream
 }
 func (UnimplementedManagementServiceServer) UpdatePeerMeta(context.Context, *UpdatePeerMetaRequest) (*UpdatePeerMetaResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdatePeerMeta not implemented")
+}
+func (UnimplementedManagementServiceServer) GetBlocklist(context.Context, *GetBlocklistRequest) (*GetBlocklistResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBlocklist not implemented")
 }
 func (UnimplementedManagementServiceServer) mustEmbedUnimplementedManagementServiceServer() {}
 func (UnimplementedManagementServiceServer) testEmbeddedByValue()                           {}
@@ -218,6 +242,24 @@ func _ManagementService_UpdatePeerMeta_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagementService_GetBlocklist_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBlocklistRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).GetBlocklist(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_GetBlocklist_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).GetBlocklist(ctx, req.(*GetBlocklistRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagementService_ServiceDesc is the grpc.ServiceDesc for ManagementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -236,6 +278,10 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdatePeerMeta",
 			Handler:    _ManagementService_UpdatePeerMeta_Handler,
+		},
+		{
+			MethodName: "GetBlocklist",
+			Handler:    _ManagementService_GetBlocklist_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

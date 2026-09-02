@@ -58,6 +58,17 @@ func (c *Client) Sync(ctx context.Context, token, wgPubKey string, handler func(
 	}
 }
 
+// GetBlocklist polls for the current malicious-domain feed. knownVersion is
+// the version last received (empty on first call); the response reports
+// NotModified and omits Domains when the feed hasn't changed since.
+func (c *Client) GetBlocklist(ctx context.Context, token, wgPubKey, knownVersion string) (*managementv1.GetBlocklistResponse, error) {
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token))
+	return c.rpc.GetBlocklist(ctx, &managementv1.GetBlocklistRequest{
+		WgPubKey:     wgPubKey,
+		KnownVersion: knownVersion,
+	})
+}
+
 func (c *Client) UpdateMeta(ctx context.Context, wgPubKey string, meta *commonv1.PeerMeta) error {
 	_, err := c.rpc.UpdatePeerMeta(ctx, &managementv1.UpdatePeerMetaRequest{
 		WgPubKey: wgPubKey,

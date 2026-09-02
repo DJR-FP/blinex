@@ -184,6 +184,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}()
 
+	// Malicious-domain blocklist: polled on its own slow cadence rather than
+	// pushed via Sync — the compiled feed can run into the tens of thousands
+	// of domains, far too large to bundle into every peer/rule update.
+	go e.pollBlocklist(ctx, loginResp.Token)
+
 	// Signal client: open stream, register, and dispatch messages.
 	sigErrCh := make(chan error, 1)
 	go func() {
@@ -221,6 +226,47 @@ func (e *Engine) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		return fmt.Errorf("sync error: %w", err)
+	}
+}
+
+// blocklistPollInterval is deliberately much shorter than the server's own
+// feed-refresh cadence (default 6h) — the version check makes an unchanged
+// poll cheap (a small RPC, no domain list), so polling often just means the
+// agent picks up a refreshed feed promptly without needing a server push.
+const blocklistPollInterval = 15 * time.Minute
+
+// pollBlocklist periodically fetches the malicious-domain feed and installs
+// it into the DNS resolver. It never returns an error upward — a feed fetch
+// failure just means filtering stays on the last-known list (or off, if none
+// has ever loaded), which shouldn't take down the whole agent.
+func (e *Engine) pollBlocklist(ctx context.Context, token string) {
+	var knownVersion string
+	fetch := func() {
+		resp, err := e.mgm.GetBlocklist(ctx, token, e.wg.PublicKey(), knownVersion)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Warn().Err(err).Msg("blocklist fetch failed, keeping previous list")
+			}
+			return
+		}
+		if resp.NotModified || resp.Version == "" {
+			return
+		}
+		e.dns.SetBlocklist(resp.Domains)
+		knownVersion = resp.Version
+		log.Info().Int("domains", len(resp.Domains)).Msg("blocklist updated")
+	}
+
+	fetch()
+	ticker := time.NewTicker(blocklistPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fetch()
+		}
 	}
 }
 

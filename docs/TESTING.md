@@ -1,4 +1,4 @@
-# Bline-X Test Plan — Groups/ACLs, Subnets, Exit Nodes
+# Bline-X Test Plan — Groups/ACLs, Subnets, Exit Nodes, Domain Filtering
 
 A short manual test plan for the features that depend on a working mesh data
 path. Run after deploying v0.10.2+ management and installing v0.10.x agents.
@@ -167,6 +167,50 @@ device drops to grey in the dashboard.
 ### Cleanup
 - Turn off the exit node. Confirm `curl https://api.ipify.org` from
   Mentor-Pi02-1 returns its own public IP again and `ip route` is restored.
+
+---
+
+## 4. Domain Filtering (v0.16.0+)
+
+On by default — no setup needed. The management server fetches a malware/C2
+domain feed on a schedule (`MGMT_BLOCKLIST_URL`, default abuse.ch URLhaus;
+`MGMT_BLOCKLIST_REFRESH`, default `6h`); every agent polls for it every 15
+minutes and blocks matches via its Magic DNS resolver (`127.0.0.1:53535`),
+answering with NXDOMAIN before the query ever leaves the device.
+
+### 4a. Confirm the server compiled a feed
+1. `docker compose logs management | grep blocklist` → a `"blocklist: feed
+   updated"` line with a nonzero `domains` count. If MGMT_BLOCKLIST_URL was
+   left at its default, this happens within a few seconds of the management
+   server starting (the first fetch is synchronous, not on the 6h timer).
+
+### 4b. Confirm an agent picked it up and blocks a known-bad domain
+1. Pick a domain currently listed in the feed you configured (check the feed
+   content directly, e.g. `curl -s https://urlhaus.abuse.ch/downloads/hostfile/
+   | grep -m1 '^0\.0\.0\.0'` — feed contents rotate, so there's no fixed
+   domain to hardcode here).
+2. On any peer, point a query at the agent's own resolver directly (this is
+   how Magic DNS is configured to be used, not the OS default resolver):
+   `dig @127.0.0.1 -p 53535 <that-domain>` (or `nslookup <that-domain>
+   127.0.0.1 -port=53535` on Windows/older `dig`-less systems).
+3. ✅ **Pass:** `NXDOMAIN` / `status: NXDOMAIN`, no answer section.
+4. Confirm an unrelated, definitely-not-malicious domain still resolves
+   normally through the same resolver (e.g. `dig @127.0.0.1 -p 53535
+   example.com`) — filtering should not be blocking traffic generally, only
+   feed matches.
+
+### 4c. Confirm subdomain coverage
+- Query a random subdomain of the same blocked domain from §4b (e.g.
+  `made-up-label.<blocked-domain>`) → also NXDOMAIN. Blocking a domain blocks
+  everything under it.
+
+### 4d. Confirm mesh (Magic DNS) resolution is unaffected
+- `dig @127.0.0.1 -p 53535 <some-peer-hostname>.blinex` → still resolves to
+  that peer's overlay IP normally. Mesh records are checked before the
+  blocklist and are never shadowed by it.
+
+### Cleanup
+- Nothing to revert — this feature has no state that a test leaves behind.
 
 ---
 

@@ -27,6 +27,8 @@ services:
       MGMT_ADMIN_PASSWORD: "${MGMT_ADMIN_PASSWORD:-}"
       MGMT_NETWORK_CIDR: "100.64.0.0/10"
       MGMT_DNS_SUFFIX: "blinex"
+      MGMT_BLOCKLIST_URL: "${MGMT_BLOCKLIST_URL:-https://urlhaus.abuse.ch/downloads/hostfile/}"
+      MGMT_BLOCKLIST_REFRESH: "${MGMT_BLOCKLIST_REFRESH:-6h}"
       BLINEX_DEFAULT_KEY: "${BLINEX_DEFAULT_KEY:?Set BLINEX_DEFAULT_KEY in .env}"
       DATABASE_URL: "host=postgres user=blinex password=${POSTGRES_PASSWORD} dbname=blinex sslmode=disable"
     volumes:

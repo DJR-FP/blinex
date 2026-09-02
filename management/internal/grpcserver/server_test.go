@@ -2,14 +2,19 @@ package grpcserver
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	commonv1 "github.com/blinex/gen/common/v1"
 	managementv1 "github.com/blinex/gen/management/v1"
 	"github.com/blinex/management/internal/auth"
+	"github.com/blinex/management/internal/blocklist"
 	"github.com/blinex/management/internal/domain"
 	"github.com/blinex/management/internal/store/memory"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func newTestServer(t *testing.T) (*Server, *memory.Store) {
@@ -20,7 +25,7 @@ func newTestServer(t *testing.T) (*Server, *memory.Store) {
 		t.Fatal(err)
 	}
 	authMgr := auth.NewManager("test-secret-at-least-32-bytes-long!!")
-	return New(st, authMgr, ipam, "100.64.0.0/10", "blinex"), st
+	return New(st, authMgr, ipam, "100.64.0.0/10", "blinex", blocklist.NewStore()), st
 }
 
 func TestLoginRejectsMissingFields(t *testing.T) {
@@ -219,5 +224,70 @@ func TestBuildSyncResponseIncludesRoutesAndAllowedIPs(t *testing.T) {
 	}
 	if len(resp.Routes) != 1 || resp.Routes[0].Network != "10.0.0.0/24" {
 		t.Fatalf("routes not built: %+v", resp.Routes)
+	}
+}
+
+func TestGetBlocklistRequiresWgPubKey(t *testing.T) {
+	s, _ := newTestServer(t)
+	_, err := s.GetBlocklist(context.Background(), &managementv1.GetBlocklistRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", err)
+	}
+}
+
+func TestGetBlocklistNilStoreIsSafe(t *testing.T) {
+	s := &Server{} // no blocklist store configured at all
+	resp, err := s.GetBlocklist(context.Background(), &managementv1.GetBlocklistRequest{WgPubKey: "pk1"})
+	if err != nil {
+		t.Fatalf("GetBlocklist: %v", err)
+	}
+	if len(resp.Domains) != 0 || resp.Version != "" {
+		t.Fatalf("expected an empty response when no blocklist store is configured, got %+v", resp)
+	}
+}
+
+func TestGetBlocklistReturnsCurrentSnapshotThenNotModified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("0.0.0.0 evil.example\n"))
+	}))
+	defer srv.Close()
+
+	bl := blocklist.NewStore()
+	fetchCtx, cancel := context.WithCancel(context.Background())
+	go bl.Run(fetchCtx, srv.URL, time.Hour)
+	// Run's first fetch is synchronous before it enters the ticker loop, but
+	// it runs on its own goroutine here — poll briefly for it to land.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, version := bl.Snapshot(); version != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("blocklist never populated")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	defer cancel()
+
+	s := &Server{blocklist: bl}
+
+	resp, err := s.GetBlocklist(context.Background(), &managementv1.GetBlocklistRequest{WgPubKey: "pk1"})
+	if err != nil {
+		t.Fatalf("GetBlocklist: %v", err)
+	}
+	if len(resp.Domains) != 1 || resp.Domains[0] != "evil.example" {
+		t.Fatalf("expected [evil.example], got %+v", resp.Domains)
+	}
+	if resp.Version == "" || resp.NotModified {
+		t.Fatalf("first call should return the full list, not NotModified: %+v", resp)
+	}
+
+	// A second call with the version just received should short-circuit.
+	resp2, err := s.GetBlocklist(context.Background(), &managementv1.GetBlocklistRequest{WgPubKey: "pk1", KnownVersion: resp.Version})
+	if err != nil {
+		t.Fatalf("GetBlocklist (known version): %v", err)
+	}
+	if !resp2.NotModified || len(resp2.Domains) != 0 {
+		t.Fatalf("expected NotModified with no domains when known_version matches, got %+v", resp2)
 	}
 }

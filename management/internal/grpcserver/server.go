@@ -8,13 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	commonv1 "github.com/blinex/gen/common/v1"
+	managementv1 "github.com/blinex/gen/management/v1"
 	"github.com/blinex/management/internal/auth"
+	"github.com/blinex/management/internal/blocklist"
 	"github.com/blinex/management/internal/domain"
 	"github.com/blinex/management/internal/geoip"
 	"github.com/blinex/management/internal/store"
-	commonv1 "github.com/blinex/gen/common/v1"
-	managementv1 "github.com/blinex/gen/management/v1"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	grpcpeer "google.golang.org/grpc/peer"
@@ -37,12 +38,13 @@ type Server struct {
 	network     string // full mesh CIDR, e.g. "100.64.0.0/10"
 	dns         string // dns suffix, e.g. "blinex"
 	loginLimits *rateLimiter
+	blocklist   *blocklist.Store // malicious-domain feed; nil-safe (empty snapshot) if unset
 
 	subsMu sync.RWMutex
 	subs   map[string]*syncSub // wgPubKey → subscriber
 }
 
-func New(st store.Store, authMgr *auth.Manager, ipam *IPAM, networkCIDR, dnsSuffix string) *Server {
+func New(st store.Store, authMgr *auth.Manager, ipam *IPAM, networkCIDR, dnsSuffix string, bl *blocklist.Store) *Server {
 	return &Server{
 		store:       st,
 		auth:        authMgr,
@@ -51,6 +53,7 @@ func New(st store.Store, authMgr *auth.Manager, ipam *IPAM, networkCIDR, dnsSuff
 		dns:         dnsSuffix,
 		subs:        make(map[string]*syncSub),
 		loginLimits: newRateLimiter(),
+		blocklist:   bl,
 	}
 }
 
@@ -257,6 +260,29 @@ func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePee
 		return nil, status.Errorf(codes.Internal, "failed to update peer: %v", err)
 	}
 	return &managementv1.UpdatePeerMetaResponse{}, nil
+}
+
+// GetBlocklist serves the compiled malicious-domain feed. The feed is global
+// (not per-account) — it's a shared threat-intel list, not policy the admin
+// authors, so there's nothing to scope per tenant.
+func (s *Server) GetBlocklist(ctx context.Context, req *managementv1.GetBlocklistRequest) (*managementv1.GetBlocklistResponse, error) {
+	if req.WgPubKey == "" {
+		return nil, status.Error(codes.InvalidArgument, "wg_pub_key is required")
+	}
+	if claims := claimsFromContext(ctx); claims != nil && claims.WGPubKey != req.WgPubKey {
+		return nil, status.Error(codes.PermissionDenied, "wg_pub_key does not match token")
+	}
+	if s.blocklist == nil {
+		return &managementv1.GetBlocklistResponse{NotModified: req.KnownVersion != ""}, nil
+	}
+	domains, version := s.blocklist.Snapshot()
+	if version == "" {
+		return &managementv1.GetBlocklistResponse{NotModified: req.KnownVersion != ""}, nil
+	}
+	if req.KnownVersion != "" && req.KnownVersion == version {
+		return &managementv1.GetBlocklistResponse{Version: version, NotModified: true}, nil
+	}
+	return &managementv1.GetBlocklistResponse{Version: version, Domains: domains}, nil
 }
 
 func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.Rule) *managementv1.SyncResponse {

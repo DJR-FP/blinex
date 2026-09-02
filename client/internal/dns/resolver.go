@@ -19,7 +19,8 @@ type Resolver struct {
 	upstream   string // e.g. "8.8.8.8:53"
 
 	mu      sync.RWMutex
-	records map[string]net.IP // "hostname.suffix" → IP
+	records map[string]net.IP   // "hostname.suffix" → IP
+	blocked map[string]struct{} // malicious domains, FQDN with trailing dot → blocked
 }
 
 func New(listenAddr, suffix, upstream string) *Resolver {
@@ -28,7 +29,42 @@ func New(listenAddr, suffix, upstream string) *Resolver {
 		suffix:     strings.ToLower(strings.Trim(suffix, ".")),
 		upstream:   upstream,
 		records:    make(map[string]net.IP),
+		blocked:    make(map[string]struct{}),
 	}
+}
+
+// SetBlocklist replaces the malicious-domain list wholesale. domains are
+// plain names without a trailing dot (e.g. "evil.example"); blocking a
+// domain also blocks all of its subdomains.
+func (r *Resolver) SetBlocklist(domains []string) {
+	blocked := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		d = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(d), "."))
+		if d == "" {
+			continue
+		}
+		blocked[d+"."] = struct{}{}
+	}
+	r.mu.Lock()
+	r.blocked = blocked
+	r.mu.Unlock()
+}
+
+// isBlocked reports whether name (a lowercased FQDN with trailing dot) or
+// any parent domain of it is on the blocklist.
+func (r *Resolver) isBlocked(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.blocked) == 0 {
+		return false
+	}
+	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	for i := range labels {
+		if _, ok := r.blocked[strings.Join(labels[i:], ".")+"."]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Upsert adds or updates a DNS record. label is the host part (e.g. "laptop").
@@ -114,8 +150,34 @@ func (r *Resolver) handle(pc net.PacketConn, addr net.Addr, raw []byte) {
 		return
 	}
 
+	if r.isBlocked(name) {
+		r.respondNXDOMAIN(pc, addr, msg)
+		return
+	}
+
 	// Forward to upstream resolver.
 	r.forward(pc, addr, raw)
+}
+
+// respondNXDOMAIN answers a query for a blocked domain with NXDOMAIN rather
+// than forwarding it — the standard "this domain does not exist" response,
+// so callers fail the same way they would for a genuinely dead domain.
+func (r *Resolver) respondNXDOMAIN(pc net.PacketConn, addr net.Addr, msg dnsmessage.Message) {
+	resp := dnsmessage.Message{
+		Header: dnsmessage.Header{
+			ID:                 msg.ID,
+			Response:           true,
+			Authoritative:      true,
+			RCode:              dnsmessage.RCodeNameError,
+			RecursionDesired:   msg.RecursionDesired,
+			RecursionAvailable: false,
+		},
+		Questions: msg.Questions,
+	}
+	packed, err := resp.Pack()
+	if err == nil {
+		_, _ = pc.WriteTo(packed, addr)
+	}
 }
 
 func (r *Resolver) forward(pc net.PacketConn, addr net.Addr, raw []byte) {
