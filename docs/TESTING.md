@@ -170,13 +170,19 @@ device drops to grey in the dashboard.
 
 ---
 
-## 4. Domain Filtering (v0.16.0+)
+## 4. Domain Filtering (v0.16.0+) and Automatic Magic DNS (v0.17.0+)
 
-On by default — no setup needed. The management server fetches a malware/C2
-domain feed on a schedule (`MGMT_BLOCKLIST_URL`, default abuse.ch URLhaus;
-`MGMT_BLOCKLIST_REFRESH`, default `6h`); every agent polls for it every 15
-minutes and blocks matches via its Magic DNS resolver (`127.0.0.1:53535`),
-answering with NXDOMAIN before the query ever leaves the device.
+On by default — no setup needed on **Linux kernel-TUN peers**. The management
+server fetches a malware/C2 domain feed on a schedule (`MGMT_BLOCKLIST_URL`,
+default abuse.ch URLhaus; `MGMT_BLOCKLIST_REFRESH`, default `6h`); every agent
+polls for it every 15 minutes and blocks matches via its Magic DNS resolver
+(`127.0.0.1:53535`), answering with NXDOMAIN before the query ever leaves the
+device. As of v0.17.0, a kernel-TUN Linux agent also points the OS's default
+DNS route at that resolver itself (via `resolvectl`), so this works with a
+plain `curl`/browser and zero manual DNS configuration — the same way
+NetBird/Tailscale's MagicDNS does. **Netstack peers (Windows, macOS,
+unprivileged LXC) and Windows generally don't have this yet** — see §4e —
+so on those you still need to query the resolver directly on its own port.
 
 ### 4a. Confirm the server compiled a feed
 1. `docker compose logs management | grep blocklist` → a `"blocklist: feed
@@ -187,30 +193,51 @@ answering with NXDOMAIN before the query ever leaves the device.
 ### 4b. Confirm an agent picked it up and blocks a known-bad domain
 1. Pick a domain currently listed in the feed you configured (check the feed
    content directly, e.g. `curl -s https://urlhaus.abuse.ch/downloads/hostfile/
-   | grep -m1 '^0\.0\.0\.0'` — feed contents rotate, so there's no fixed
+   | grep -m1 '^127\.0\.0\.1'` — feed contents rotate, so there's no fixed
    domain to hardcode here).
-2. On any peer, point a query at the agent's own resolver directly (this is
-   how Magic DNS is configured to be used, not the OS default resolver):
+2. **On a kernel-TUN Linux peer already on v0.17.0**, just use the normal
+   system resolver — this is the point of §4e's auto-configuration:
+   `curl <that-domain>` → `Could not resolve host`. `getent hosts
+   <that-domain>` → exit code 2, nothing printed.
+3. **On any other peer** (netstack, Windows, or a kernel-TUN peer still on
+   v0.16.x), query the agent's resolver directly on its own port instead:
    `dig @127.0.0.1 -p 53535 <that-domain>` (or `nslookup <that-domain>
    127.0.0.1 -port=53535` on Windows/older `dig`-less systems).
-3. ✅ **Pass:** `NXDOMAIN` / `status: NXDOMAIN`, no answer section.
-4. Confirm an unrelated, definitely-not-malicious domain still resolves
-   normally through the same resolver (e.g. `dig @127.0.0.1 -p 53535
-   example.com`) — filtering should not be blocking traffic generally, only
-   feed matches.
+4. ✅ **Pass:** `NXDOMAIN` / `status: NXDOMAIN` (or curl's "Could not resolve
+   host"), no answer.
+5. Confirm an unrelated, definitely-not-malicious domain still resolves
+   normally through the same path — filtering should not be blocking traffic
+   generally, only feed matches.
 
 ### 4c. Confirm subdomain coverage
 - Query a random subdomain of the same blocked domain from §4b (e.g.
-  `made-up-label.<blocked-domain>`) → also NXDOMAIN. Blocking a domain blocks
-  everything under it.
+  `made-up-label.<blocked-domain>`) → also NXDOMAIN/unresolvable. Blocking a
+  domain blocks everything under it.
 
 ### 4d. Confirm mesh (Magic DNS) resolution is unaffected
-- `dig @127.0.0.1 -p 53535 <some-peer-hostname>.blinex` → still resolves to
-  that peer's overlay IP normally. Mesh records are checked before the
-  blocklist and are never shadowed by it.
+- Resolve `<some-peer-hostname>.blinex` (via `getent hosts` on an auto-
+  configured kernel-TUN peer, or `dig @127.0.0.1 -p 53535 ...` elsewhere) →
+  still resolves to that peer's overlay IP normally. Mesh records are checked
+  before the blocklist and are never shadowed by it.
+
+### 4e. Confirm automatic DNS configuration (kernel-TUN Linux only, v0.17.0+)
+1. On a kernel-TUN Linux peer, after the agent starts:
+   `resolvectl status <iface>` (e.g. `blinex0`) → `Current Scopes: DNS`,
+   `+DefaultRoute`, `Current DNS Server: 127.0.0.1:53535`, `DNS Domain: ~.`.
+2. `journalctl -u blinex-agent | grep dnsconfig` → a `"dnsconfig: system DNS
+   now routed through the agent"` line.
+3. **Crash recovery:** `sudo pkill -9 blinex-agent`, then immediately
+   `resolvectl status <iface>` → `Failed to resolve interface ... No such
+   device` (the non-persistent TUN device died with the process, and
+   systemd-resolved dropped the override with it) and `getent hosts
+   example.com` still resolves normally — no stuck DNS, nothing to clean up
+   by hand. Restart the agent afterward.
+4. **Graceful shutdown:** `sudo systemctl stop blinex-agent` → same result,
+   `resolvectl status <iface>` shows the link gone and system DNS unaffected.
 
 ### Cleanup
-- Nothing to revert — this feature has no state that a test leaves behind.
+- Nothing to revert — filtering and DNS auto-configuration both fully clean
+  up after themselves (§4e), whether the agent stops gracefully or crashes.
 
 ---
 

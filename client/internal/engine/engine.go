@@ -14,24 +14,30 @@ import (
 	"sync"
 	"time"
 
-	commonv1 "github.com/blinex/gen/common/v1"
-	managementv1 "github.com/blinex/gen/management/v1"
-	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/blinex/client/internal/acl"
 	"github.com/blinex/client/internal/config"
 	"github.com/blinex/client/internal/controlapi"
 	"github.com/blinex/client/internal/dns"
+	"github.com/blinex/client/internal/dnsconfig"
 	"github.com/blinex/client/internal/ice"
 	"github.com/blinex/client/internal/mgmclient"
+	"github.com/blinex/client/internal/peer"
 	"github.com/blinex/client/internal/peerlink"
 	"github.com/blinex/client/internal/relay"
-	"github.com/blinex/client/internal/peer"
 	"github.com/blinex/client/internal/routing"
 	"github.com/blinex/client/internal/signalclient"
 	"github.com/blinex/client/internal/state"
 	"github.com/blinex/client/internal/wgmgr"
+	commonv1 "github.com/blinex/gen/common/v1"
+	managementv1 "github.com/blinex/gen/management/v1"
+	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/rs/zerolog/log"
 )
+
+// dnsListenAddr is where the Magic DNS resolver listens — shared with
+// dnsconfig.Apply so the OS is pointed at the same address the resolver
+// actually answers on.
+const dnsListenAddr = "127.0.0.1:53535"
 
 // exitNodeState holds the routing state installed when an exit node is active.
 type exitNodeState struct {
@@ -50,17 +56,17 @@ type Engine struct {
 	dns           *dns.Resolver
 	peers         *peer.Manager
 	forwarder     *wgmgr.Forwarder
-	relayConns    map[string]*relay.Conn     // peerKey → relay connection (for sending)
-	relayEndpts   map[string]netip.AddrPort  // peerKey → virtual endpoint address
+	relayConns    map[string]*relay.Conn    // peerKey → relay connection (for sending)
+	relayEndpts   map[string]netip.AddrPort // peerKey → virtual endpoint address
 	mu            sync.Mutex
 	links         map[string]*peerlink.Link // peerKey → data path link (relay + ICE)
 	appliedRoutes map[string][]string       // peerKey → route CIDRs currently installed in OS
 	exitNode      *exitNodeState            // non-nil when exit node routing is active
 	ctx           context.Context
 
-	selfIP     string             // own mesh IP (CIDR), set after enrollment
-	lastRoutes []*commonv1.Route  // routes from the most recent sync (for status)
-	ctrlClose  func()             // stops the local control socket
+	selfIP     string            // own mesh IP (CIDR), set after enrollment
+	lastRoutes []*commonv1.Route // routes from the most recent sync (for status)
+	ctrlClose  func()            // stops the local control socket
 }
 
 // New creates an Engine. Loads or generates the WireGuard private key from state.
@@ -94,7 +100,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	iceMgr := ice.New(wg.PublicKey(), cfg.STUNURLs, cfg.TURNUser, cfg.TURNPass, sig)
-	dnsResolver := dns.New("127.0.0.1:53535", "blinex", cfg.DNSUpstream)
+	dnsResolver := dns.New(dnsListenAddr, "blinex", cfg.DNSUpstream)
 
 	return &Engine{
 		cfg:           cfg,
@@ -148,6 +154,18 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	if err := e.wg.SetAddress(loginResp.NetworkConfig.Address); err != nil {
 		return fmt.Errorf("setting WireGuard address: %w", err)
+	}
+
+	// Point the OS at our own Magic DNS resolver, the way NetBird/Tailscale's
+	// MagicDNS does — without this, mesh hostnames and domain filtering only
+	// work if a user manually reconfigures their system DNS. Kernel-TUN only
+	// for now (a real interface to attach the override's lifetime to): if the
+	// agent dies uncleanly, the OS destroys the interface and the DNS
+	// override goes with it, so there's nothing to leave stuck. Netstack
+	// peers (no real interface) aren't covered yet.
+	if !e.wg.NetstackMode() {
+		dnsconfig.Apply(e.cfg.WGInterface, dnsListenAddr)
+		defer dnsconfig.Revert(e.cfg.WGInterface)
 	}
 
 	// Local control socket for `blinex-agent status|peers|routes`.
