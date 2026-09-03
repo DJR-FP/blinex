@@ -19,11 +19,31 @@ import (
 var version = "dev"
 
 func main() {
+	// When Windows starts this exe as a service, it does so via the Service
+	// Control Manager with no arguments the switch below would recognize —
+	// this check must run before any of that, and unconditionally, or the
+	// SCM never gets the prompt "I'm alive" response it expects and reports
+	// the service failed to start. No-op on every other OS.
+	if isWindowsService() {
+		runAsService()
+		return
+	}
+
 	// Subcommands query a running agent over its local control socket.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "status", "peers", "routes":
 			runCLI(os.Args[1], os.Args[2:])
+			return
+		case "install":
+			runInstall(os.Args[2:])
+			return
+		case "uninstall":
+			if err := uninstallService(); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			fmt.Println("service removed")
 			return
 		case "version", "-version", "--version":
 			fmt.Println(version)
@@ -34,6 +54,34 @@ func main() {
 		}
 	}
 	runDaemon()
+}
+
+func runInstall(args []string) {
+	fs := flag.NewFlagSet("install", flag.ExitOnError)
+	setupKey := fs.String("setup-key", "", "enrollment key from the Setup Keys page (required)")
+	mgmtURL := fs.String("management-url", "", "management server address, host:50051 (required)")
+	sigURL := fs.String("signal-url", "", "signal server address, host:10000 (required)")
+	_ = fs.Parse(args)
+
+	if *setupKey == "" || *mgmtURL == "" || *sigURL == "" {
+		fmt.Fprintln(os.Stderr, "error: -setup-key, -management-url, and -signal-url are all required")
+		fs.Usage()
+		os.Exit(1)
+	}
+	fmt.Println("note: this binary is not code-signed. Windows Defender's real-time")
+	fmt.Println("protection may flag and remove it and the service it creates — a service")
+	fmt.Println("that rewrites system DNS settings and binds port 53 looks a lot like known")
+	fmt.Println("DNS-hijacking malware. If install succeeds but the service vanishes shortly")
+	fmt.Println("after, check Get-MpThreatDetection. For testing, exclude this folder:")
+	fmt.Println(`  Add-MpPreference -ExclusionPath "<this folder>"`)
+	fmt.Println("Do not ship an unsigned build to real users for this reason.")
+	fmt.Println()
+
+	if err := installService(*setupKey, *mgmtURL, *sigURL); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	fmt.Println("service installed and started — it will now start on boot and restart automatically if it crashes")
 }
 
 func runDaemon() {
@@ -140,13 +188,21 @@ func printUsage() {
 	fmt.Print(`blinex-agent — Bline-X mesh VPN agent
 
 Usage:
-  blinex-agent [-config <path>]      run the agent (daemon)
+  blinex-agent [-config <path>]      run the agent in the foreground
   blinex-agent status                show this device's mesh status
   blinex-agent peers                 list mesh peers and their data path
   blinex-agent routes                list advertised subnet / exit-node routes
   blinex-agent version               print the agent version
 
-Subcommands query the running agent via its control socket
+  Windows only, run as Administrator:
+  blinex-agent install -setup-key <key> -management-url <host:50051> -signal-url <host:10000>
+                                      install as a Windows Service: starts on
+                                      boot and restarts automatically on a
+                                      crash; Stop-Service/net stop still works
+                                      normally and does not trigger a restart
+  blinex-agent uninstall             stop and remove the service
+
+Status/peers/routes query the running agent via its control socket
 (default ` + controlapi.DefaultSocket + `, override with -socket).
 `)
 }

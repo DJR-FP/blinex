@@ -290,6 +290,58 @@ environment exists to build/verify against yet).
 
 ---
 
+## 5. Windows Service Install (v0.18.0+)
+
+Replaces running the agent as a foreground process in a console window — the
+service starts on boot and restarts automatically on a crash, matching
+Linux's `systemd Restart=on-failure`, while a deliberate stop is honored
+immediately and does not trigger a restart.
+
+> **Defender will very likely remove it on a fresh Windows box first.** An
+> unsigned executable that creates a persistent service, rewrites system DNS,
+> and binds port 53 matches the behavioral signature Windows Defender uses
+> for DNS-hijacking malware — this isn't a theoretical concern, it happened
+> live during this feature's own testing (`Get-MpThreatDetection` showed both
+> a running v0.17.0 process and, later, the entire v0.18.0 service
+> registration detected and removed within seconds of each appearing). For
+> testing, exclude the folder first: `Add-MpPreference -ExclusionPath
+> "<folder>"`. **Do not treat that as a fix for shipping to real users** — see
+> the code-signing item in the README roadmap.
+
+### 5a. Install
+1. Elevated PowerShell/cmd (Administrator): `.\blinex-agent.exe install
+   -setup-key <key> -management-url <host:50051> -signal-url <host:10000>`.
+2. ✅ **Pass:** prints `service installed and started`; `Get-Service
+   BlinexAgent` → `Status: Running`, `StartType: Automatic`.
+3. Confirm it actually enrolled: check the peer's `version` and `last_seen`
+   in the dashboard/API, and re-run the DNS checks from §4b–§4d.
+
+### 5b. Crash recovery
+1. Find the running PID: `tasklist | findstr blinex`.
+2. `taskkill /PID <pid> /F` — simulates a crash, not a clean stop.
+3. ✅ **Pass:** within a few seconds, `Get-Service BlinexAgent` shows
+   `Running` again with a **different** PID (`tasklist` again — a restart,
+   not the same process surviving), and a fresh `last_seen`/re-enrollment in
+   the dashboard. DNS filtering (§4b) should be intact throughout — no
+   manual restart needed.
+
+### 5c. Manual stop is honored and does not restart
+1. `Stop-Service BlinexAgent` (or `net stop BlinexAgent`).
+2. ✅ **Pass:** the service reaches `Stopped` and **stays** stopped — wait
+   at least as long as 5b's recovery took and confirm no new PID/re-enrollment
+   appears. This is the key difference from 5b: a requested stop must not
+   look like a crash to the SCM.
+3. Confirm DNS reverted: adapter DNS servers (§4e's Windows check) should be
+   back to their original values, not stuck at `127.0.0.1`.
+4. `Start-Service BlinexAgent` to bring it back for further testing.
+
+### Cleanup
+- `blinex-agent uninstall` (elevated) stops and removes the service. The
+  config file at `%ProgramData%\blinex\agent.json` is left in place
+  (harmless — reused if you reinstall).
+
+---
+
 ## What to capture if something fails
 
 - Agent: `journalctl -u blinex-agent -n 50 --no-pager`
