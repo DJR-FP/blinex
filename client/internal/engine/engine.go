@@ -158,14 +158,18 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Point the OS at our own Magic DNS resolver, the way NetBird/Tailscale's
 	// MagicDNS does — without this, mesh hostnames and domain filtering only
-	// work if a user manually reconfigures their system DNS. Kernel-TUN only
-	// for now (a real interface to attach the override's lifetime to): if the
-	// agent dies uncleanly, the OS destroys the interface and the DNS
-	// override goes with it, so there's nothing to leave stuck. Netstack
-	// peers (no real interface) aren't covered yet.
+	// work if a user manually reconfigures their system DNS. Kernel-TUN peers
+	// get a per-link override tied to the interface's own lifetime (crash-safe
+	// for free — see dnsconfig.Apply). Netstack peers have no such interface,
+	// so they get a global override instead, backed by systemd's
+	// Restart=on-failure for crash recovery rather than OS-level teardown —
+	// see dnsconfig.ApplyGlobal.
 	if !e.wg.NetstackMode() {
 		dnsconfig.Apply(e.cfg.WGInterface, dnsListenAddr)
 		defer dnsconfig.Revert(e.cfg.WGInterface)
+	} else {
+		dnsconfig.ApplyGlobal(dnsListenAddr)
+		defer dnsconfig.RevertGlobal()
 	}
 
 	// Local control socket for `blinex-agent status|peers|routes`.
