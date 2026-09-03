@@ -172,17 +172,18 @@ device drops to grey in the dashboard.
 
 ## 4. Domain Filtering (v0.16.0+) and Automatic Magic DNS (v0.17.0+)
 
-On by default — no setup needed on **Linux kernel-TUN peers**. The management
-server fetches a malware/C2 domain feed on a schedule (`MGMT_BLOCKLIST_URL`,
-default abuse.ch URLhaus; `MGMT_BLOCKLIST_REFRESH`, default `6h`); every agent
-polls for it every 15 minutes and blocks matches via its Magic DNS resolver
-(`127.0.0.1:53535`), answering with NXDOMAIN before the query ever leaves the
-device. As of v0.17.0, a kernel-TUN Linux agent also points the OS's default
-DNS route at that resolver itself (via `resolvectl`), so this works with a
-plain `curl`/browser and zero manual DNS configuration — the same way
-NetBird/Tailscale's MagicDNS does. **Netstack peers (Windows, macOS,
-unprivileged LXC) and Windows generally don't have this yet** — see §4e —
-so on those you still need to query the resolver directly on its own port.
+On by default, on every platform the client supports — no setup needed. The
+management server fetches a malware/C2 domain feed on a schedule
+(`MGMT_BLOCKLIST_URL`, default abuse.ch URLhaus; `MGMT_BLOCKLIST_REFRESH`,
+default `6h`); every agent polls for it every 15 minutes and blocks matches
+via its Magic DNS resolver (`127.0.0.1:53535`), answering with NXDOMAIN
+before the query ever leaves the device. As of v0.17.0, every agent also
+points the OS's default DNS route at that resolver itself — the same way
+NetBird/Tailscale's MagicDNS does — so this works with a plain `curl`,
+`nslookup`, or browser and zero manual DNS configuration, on kernel-TUN
+Linux, netstack Linux (unprivileged LXC), and Windows alike. Only macOS
+still needs DNS pointed at `127.0.0.1:53535` by hand (no macOS test
+environment exists to build/verify against yet).
 
 ### 4a. Confirm the server compiled a feed
 1. `docker compose logs management | grep blocklist` → a `"blocklist: feed
@@ -195,14 +196,14 @@ so on those you still need to query the resolver directly on its own port.
    content directly, e.g. `curl -s https://urlhaus.abuse.ch/downloads/hostfile/
    | grep -m1 '^127\.0\.0\.1'` — feed contents rotate, so there's no fixed
    domain to hardcode here).
-2. **On a kernel-TUN Linux peer already on v0.17.0**, just use the normal
+2. **On any peer already on v0.17.0** (any platform), just use the normal
    system resolver — this is the point of §4e's auto-configuration:
-   `curl <that-domain>` → `Could not resolve host`. `getent hosts
-   <that-domain>` → exit code 2, nothing printed.
-3. **On any other peer** (netstack, Windows, or a kernel-TUN peer still on
-   v0.16.x), query the agent's resolver directly on its own port instead:
-   `dig @127.0.0.1 -p 53535 <that-domain>` (or `nslookup <that-domain>
-   127.0.0.1 -port=53535` on Windows/older `dig`-less systems).
+   - Linux: `curl <that-domain>` → `Could not resolve host`. `getent hosts
+     <that-domain>` → exit code 2, nothing printed.
+   - Windows: `nslookup <that-domain>` → `Non-existent domain`.
+3. **On a peer still on v0.16.x** (pre-dating auto-configuration), query the
+   agent's resolver directly on its own port instead: `dig @127.0.0.1 -p
+   53535 <that-domain>`.
 4. ✅ **Pass:** `NXDOMAIN` / `status: NXDOMAIN` (or curl's "Could not resolve
    host"), no answer.
 5. Confirm an unrelated, definitely-not-malicious domain still resolves
@@ -215,15 +216,18 @@ so on those you still need to query the resolver directly on its own port.
   domain blocks everything under it.
 
 ### 4d. Confirm mesh (Magic DNS) resolution is unaffected
-- Resolve `<some-peer-hostname>.blinex` (via `getent hosts` on an auto-
-  configured kernel-TUN peer, or `dig @127.0.0.1 -p 53535 ...` elsewhere) →
-  still resolves to that peer's overlay IP normally. Mesh records are checked
-  before the blocklist and are never shadowed by it.
+- Resolve `<some-peer-hostname>.blinex` (via `getent hosts`/`nslookup` on any
+  peer already on v0.17.0's auto-configuration, or `dig @127.0.0.1 -p 53535
+  ...` on one still manually configured) → still resolves to that peer's
+  overlay IP normally. Mesh records are checked before the blocklist and are
+  never shadowed by it.
 
-### 4e. Confirm automatic DNS configuration (kernel-TUN Linux only, v0.17.0+)
-1. On a kernel-TUN Linux peer, after the agent starts:
-   `resolvectl status <iface>` (e.g. `blinex0`) → `Current Scopes: DNS`,
-   `+DefaultRoute`, `Current DNS Server: 127.0.0.1:53535`, `DNS Domain: ~.`.
+### 4e. Confirm automatic DNS configuration (v0.17.0+)
+
+**Kernel-TUN Linux** (per-link override via `resolvectl`):
+1. After the agent starts: `resolvectl status <iface>` (e.g. `blinex0`) →
+   `Current Scopes: DNS`, `+DefaultRoute`, `Current DNS Server:
+   127.0.0.1:53535`, `DNS Domain: ~.`.
 2. `journalctl -u blinex-agent | grep dnsconfig` → a `"dnsconfig: system DNS
    now routed through the agent"` line.
 3. **Crash recovery:** `sudo pkill -9 blinex-agent`, then immediately
@@ -231,9 +235,54 @@ so on those you still need to query the resolver directly on its own port.
    device` (the non-persistent TUN device died with the process, and
    systemd-resolved dropped the override with it) and `getent hosts
    example.com` still resolves normally — no stuck DNS, nothing to clean up
-   by hand. Restart the agent afterward.
+   by hand. `systemd Restart=on-failure` brings the agent back within a few
+   seconds on its own.
 4. **Graceful shutdown:** `sudo systemctl stop blinex-agent` → same result,
    `resolvectl status <iface>` shows the link gone and system DNS unaffected.
+
+**Netstack Linux** (unprivileged LXC — global override, UDP relay `:53` →
+`:53535`, `/etc/resolv.conf` rewritten):
+1. After the agent starts: `cat /etc/resolv.conf` → `nameserver 127.0.0.1`
+   with a comment naming the backup path (`/etc/blinex/resolv.conf.bak`).
+2. `sudo cat /etc/blinex/resolv.conf.bak` → the real original content (not
+   our own override — if this ever shows `nameserver 127.0.0.1` too,
+   something backed up its own override instead of the real original, which
+   is exactly the bug the "only back up if absent" rule exists to prevent).
+3. `journalctl -u blinex-agent | grep dnsconfig` → a `"dnsconfig: system DNS
+   now routed through the agent (global override)"` line.
+4. **Crash recovery:** `sudo pkill -9 blinex-agent`. Unlike kernel-TUN,
+   there's no interface to disappear, so this leans entirely on
+   `Restart=on-failure` — confirm `sudo systemctl status blinex-agent` shows
+   it back up within a few seconds, `/etc/resolv.conf` still points at
+   127.0.0.1 with the *original* backup file untouched, and filtering still
+   works (§4b). Note SSH sessions reaching this host over the mesh itself
+   will drop when the interface dies and may need a moment (or a retry) to
+   reconnect once the new process is up — a transport artifact of testing
+   through the very tunnel being torn down, not a sign anything is broken;
+   check `journalctl` timestamps if in doubt about what actually happened.
+5. **Graceful shutdown:** `sudo systemctl stop blinex-agent` →
+   `/etc/resolv.conf` restored to the real original, backup file removed,
+   `journalctl` shows `"dnsconfig: restored original /etc/resolv.conf"`
+   logged in the same second as the stop request.
+
+**Windows** (global override, UDP relay `:53` → `:53535`,
+`Set-DnsClientServerAddress` on every "Up" adapter):
+1. After the agent starts: `Get-NetAdapter | Where-Object {$_.Status -eq
+   'Up'} | ForEach-Object { Get-DnsClientServerAddress -InterfaceIndex
+   $_.InterfaceIndex -AddressFamily IPv4 }` → every active adapter shows
+   `127.0.0.1`.
+2. `Get-Content $env:ProgramData\blinex\dns-backup.json` → the real original
+   per-adapter DNS servers (empty array for an adapter that was on
+   DHCP-assigned DNS, explicit IPs for one with static DNS configured).
+3. ⚠️ **No crash-recovery safety net today** — see the roadmap. If the
+   process is killed uncleanly, every adapter stays pointed at 127.0.0.1
+   with nothing listening until someone manually restarts the agent (DNS
+   fails safe — queries just fail — but the device won't self-heal the way
+   Linux does). Live-tested during v0.17.0's rollout: exactly this happened
+   during a routine binary swap and needed a manual console restart.
+4. **Graceful shutdown:** stopping the process (Ctrl+C in its console
+   window, or killing it cleanly) restores each adapter's original DNS
+   servers from the backup file and deletes it.
 
 ### Cleanup
 - Nothing to revert — filtering and DNS auto-configuration both fully clean
