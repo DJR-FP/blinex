@@ -123,7 +123,7 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		OS:         os,
 		Kernel:     kernel,
 		Version:    coreVersion,
-		DNSLabel:   toDNSLabel(hostname),
+		DNSLabel:   domain.ToDNSLabel(hostname),
 		Groups:     groups,
 		AllowedIPs: []string{ip + "/32"},
 		LastSeen:   time.Now(),
@@ -145,6 +145,12 @@ func (s *Server) Login(ctx context.Context, req *managementv1.LoginRequest) (*ma
 		// resurrect a group an operator deliberately removed the peer from.
 		peer.Groups = existing.Groups
 		peer.AdvertisedRoutes = existing.AdvertisedRoutes
+		// A dashboard-set device name is operator-managed the same way: once
+		// a peer exists, its own OS-reported hostname on a later reconnect
+		// (a reboot, a service restart, ...) must not silently overwrite a
+		// name someone deliberately gave it.
+		peer.Hostname = existing.Hostname
+		peer.DNSLabel = existing.DNSLabel
 	}
 
 	if err := s.store.SavePeer(ctx, peer); err != nil {
@@ -250,7 +256,7 @@ func (s *Server) UpdatePeerMeta(ctx context.Context, req *managementv1.UpdatePee
 		peer.OS = req.Meta.Os
 		peer.Kernel = req.Meta.Kernel
 		peer.Version = req.Meta.CoreVersion
-		peer.DNSLabel = toDNSLabel(req.Meta.Hostname)
+		peer.DNSLabel = domain.ToDNSLabel(req.Meta.Hostname)
 		if req.Meta.LocalIp != "" {
 			peer.LocalIP = req.Meta.LocalIp
 		}
@@ -483,19 +489,4 @@ func (s *Server) resolveCountryAsync(wgPubKey, ip string) {
 			log.Warn().Err(err).Msg("failed to save resolved country")
 		}
 	}()
-}
-
-func toDNSLabel(hostname string) string {
-	label := strings.ToLower(hostname)
-	label = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			return r
-		}
-		return '-'
-	}, label)
-	label = strings.Trim(label, "-")
-	if label == "" {
-		label = "peer-" + uuid.NewString()[:8]
-	}
-	return label
 }

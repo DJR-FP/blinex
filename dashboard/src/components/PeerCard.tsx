@@ -12,15 +12,50 @@ interface Props {
   onDelete: (key: string) => void
   onRoutesChange: (key: string, routes: string[]) => Promise<void>
   onGroupsChange: (key: string, groups: string[]) => Promise<void>
+  onRename: (key: string, hostname: string) => Promise<void>
 }
 
-export function PeerCard({ peer, onDelete, onRoutesChange, onGroupsChange }: Props) {
+export function PeerCard({ peer, onDelete, onRoutesChange, onGroupsChange, onRename }: Props) {
   const [showRoutes, setShowRoutes] = useState(false)
   const [showGroups, setShowGroups] = useState(false)
   const [newCIDR, setNewCIDR] = useState('')
   const [newGroup, setNewGroup] = useState('')
   const [saving, setSaving] = useState(false)
   const [cidrError, setCIDRError] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState(peer.hostname)
+  const [nameError, setNameError] = useState('')
+
+  const startEditingName = () => {
+    setNameDraft(peer.hostname)
+    setNameError('')
+    setEditingName(true)
+  }
+
+  const saveName = async () => {
+    const trimmed = nameDraft.trim()
+    if (trimmed === peer.hostname) {
+      setEditingName(false)
+      return
+    }
+    if (!trimmed) {
+      setNameError('Name cannot be empty')
+      return
+    }
+    if (trimmed.length > 63) {
+      setNameError('Name must be 63 characters or fewer')
+      return
+    }
+    setSaving(true)
+    try {
+      await onRename(peer.wg_pub_key, trimmed)
+      setEditingName(false)
+    } catch (e) {
+      setNameError(String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const routes = peer.advertised_routes ?? []
   const groups = peer.groups ?? []
@@ -87,7 +122,32 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onGroupsChange }: Pro
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-semibold text-gray-900 truncate">{peer.hostname || 'Unknown'}</p>
+            {editingName ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  autoFocus
+                  value={nameDraft}
+                  onChange={e => { setNameDraft(e.target.value); setNameError('') }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') saveName()
+                    if (e.key === 'Escape') setEditingName(false)
+                  }}
+                  onBlur={saveName}
+                  disabled={saving}
+                  className="font-semibold text-gray-900 border border-brand-300 rounded px-1.5 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
+                />
+              </div>
+            ) : (
+              <button
+                onClick={startEditingName}
+                className="font-semibold text-gray-900 truncate hover:text-brand-600 transition-colors flex items-center gap-1 group"
+                title="Rename device"
+              >
+                {peer.hostname || 'Unknown'}
+                <span className="opacity-0 group-hover:opacity-100 text-gray-300 text-xs transition-opacity">✎</span>
+              </button>
+            )}
             <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{peer.os}</span>
             {peer.version && (
               <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono">
@@ -100,6 +160,7 @@ export function PeerCard({ peer, onDelete, onRoutesChange, onGroupsChange }: Pro
               </span>
             )}
           </div>
+          {nameError && <p className="text-xs text-red-500 mt-0.5">{nameError}</p>}
           <p className="text-sm text-gray-500 mt-0.5 font-mono">{peer.ip} <span className="text-gray-300">(overlay)</span></p>
           {(peer.local_ip || peer.public_ip) && (
             <p className="text-xs text-gray-400 mt-0.5 font-mono">

@@ -342,6 +342,39 @@ immediately and does not trigger a restart.
 
 ---
 
+## 6. Renaming a Device (v0.19.0+)
+
+### 6a. Rename sticks
+1. Dashboard → Devices → click a device's name, edit it, press Enter (or
+   click away to save).
+2. ✅ **Pass:** the card updates immediately; the `<name>.blinex` shown under
+   the IP updates to match.
+
+### 6b. Rename survives an agent restart
+- The real point of this feature: restart the renamed device's agent
+  (`systemctl restart blinex-agent`, or `Restart-Service BlinexAgent` on
+  Windows) and confirm the dashboard still shows the custom name afterward,
+  not the device's real OS hostname. A fresh `last_seen` timestamp
+  confirms it actually re-enrolled rather than just still being up.
+
+### 6c. Old DNS name stops resolving, new one works — without restarting the *other* peer
+1. From a second peer (**not** the one being renamed), confirm the
+   pre-rename name resolves: `getent hosts old-name.blinex` (or
+   `nslookup old-name.blinex` on Windows).
+2. Rename the first device via the dashboard.
+3. Wait a few seconds for the sync push, then from that same second peer
+   (still running, not restarted): `getent hosts new-name.blinex` → resolves;
+   `getent hosts old-name.blinex` → **exit code 2, nothing printed** (Windows:
+   `nslookup` reports "Non-existent domain").
+4. ✅ **Pass:** the new name resolves and the old one is fully gone, live,
+   with no restart needed anywhere. If the old name still resolves, the
+   stale-DNS-record bug this feature fixed has regressed.
+
+### Cleanup
+- Rename the device back if you don't want the test name to stick.
+
+---
+
 ## What to capture if something fails
 
 - Agent: `journalctl -u blinex-agent -n 50 --no-pager`

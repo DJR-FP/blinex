@@ -483,7 +483,8 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		e.ice.StartConnect(e.ctx, p.WgPubKey)
 	}
 
-	for _, p := range updated {
+	for _, u := range updated {
+		p := u.New
 		if p.WgPubKey == selfKey {
 			continue
 		}
@@ -492,6 +493,13 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		}
 		if !e.wg.NetstackMode() {
 			e.applyOSRoutes(p.WgPubKey, e.appliedRoutes[p.WgPubKey], routesByGateway[p.WgPubKey])
+		}
+		// A renamed device gets a new dns_label — without removing the old
+		// one first, both the old and new <name>.blinex would resolve to
+		// the same IP forever, which is exactly the kind of stale DNS state
+		// a rename should avoid.
+		if u.Old.DnsLabel != p.DnsLabel {
+			e.dns.Remove(u.Old.DnsLabel)
 		}
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 	}

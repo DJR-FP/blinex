@@ -37,6 +37,24 @@ func TestDiffDetectsUpdate(t *testing.T) {
 	}
 }
 
+// TestDiffUpdateCarriesOldAndNewState guards the dashboard-rename DNS
+// cleanup: callers need both states to know a peer's *previous* dns_label
+// so they can remove the stale record, not just apply the new one.
+func TestDiffUpdateCarriesOldAndNewState(t *testing.T) {
+	m := New()
+	m.Diff([]*commonv1.Peer{p("k1", "100.64.0.1", "old-name")})
+	_, updated, _ := m.Diff([]*commonv1.Peer{p("k1", "100.64.0.1", "new-name")})
+	if len(updated) != 1 {
+		t.Fatalf("expected 1 updated, got %d", len(updated))
+	}
+	if updated[0].Old.Hostname != "old-name" {
+		t.Errorf("Old.Hostname = %q, want %q", updated[0].Old.Hostname, "old-name")
+	}
+	if updated[0].New.Hostname != "new-name" {
+		t.Errorf("New.Hostname = %q, want %q", updated[0].New.Hostname, "new-name")
+	}
+}
+
 func TestDiffDetectsAllowedIPChange(t *testing.T) {
 	m := New()
 	m.Diff([]*commonv1.Peer{p("k1", "100.64.0.1", "a", "100.64.0.1/32")})

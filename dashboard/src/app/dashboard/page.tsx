@@ -51,6 +51,15 @@ export default function DevicesPage() {
     setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, groups: updated.groups } : p))
   }
 
+  const handleRename = async (key: string, hostname: string) => {
+    // The API replaces the whole groups list on every PUT, so the peer's
+    // current groups must be sent along with the rename or they'd be reset
+    // to just Default.
+    const current = peers.find(p => p.wg_pub_key === key)
+    const updated = await api.peers.update(key, { groups: current?.groups ?? [], hostname })
+    setPeers(prev => prev.map(p => p.wg_pub_key === key ? { ...p, hostname: updated.hostname, dns_label: updated.dns_label } : p))
+  }
+
   const connected = peers.filter(p => p.connected).length
   const installCmd = `curl -fsSL https://install.blinex.co.uk/agent | BLINEX_SETUP_KEY=<your-key> bash`
 
@@ -108,7 +117,7 @@ export default function DevicesPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {peers.map(p => (
-          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} onGroupsChange={handleGroupsChange} />
+          <PeerCard key={p.wg_pub_key} peer={p} onDelete={handleDelete} onRoutesChange={handleRoutesChange} onGroupsChange={handleGroupsChange} onRename={handleRename} />
         ))}
       </div>
     </div>

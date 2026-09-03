@@ -121,6 +121,40 @@ func TestLoginReenrollPreservesGroups(t *testing.T) {
 	}
 }
 
+// TestLoginReenrollPreservesCustomName guards the dashboard rename feature:
+// a device's own OS-reported hostname on a later reconnect (reboot, service
+// restart, ...) must not silently overwrite an operator-set name.
+func TestLoginReenrollPreservesCustomName(t *testing.T) {
+	s, st := newTestServer(t)
+	ctx := context.Background()
+	_, _ = s.Login(ctx, &managementv1.LoginRequest{
+		SetupKey: "seed-key", WgPubKey: "pk1",
+		Meta: &commonv1.PeerMeta{Hostname: "laptop-42"},
+	})
+
+	// Operator renames the device via the dashboard.
+	p, _ := st.GetPeer(ctx, "pk1")
+	p.Hostname = "alices-laptop"
+	p.DNSLabel = "alices-laptop"
+	_ = st.SavePeer(ctx, p)
+
+	// Agent restarts and re-enrolls, still reporting its real OS hostname.
+	if _, err := s.Login(ctx, &managementv1.LoginRequest{
+		SetupKey: "seed-key", WgPubKey: "pk1",
+		Meta: &commonv1.PeerMeta{Hostname: "laptop-42"},
+	}); err != nil {
+		t.Fatalf("re-enroll: %v", err)
+	}
+
+	after, _ := st.GetPeer(ctx, "pk1")
+	if after.Hostname != "alices-laptop" {
+		t.Fatalf("custom name lost on re-enroll: got %q", after.Hostname)
+	}
+	if after.DNSLabel != "alices-laptop" {
+		t.Fatalf("DNS label out of sync with custom name: got %q", after.DNSLabel)
+	}
+}
+
 func TestLoginRejectsCrossAccountHijack(t *testing.T) {
 	s, st := newTestServer(t)
 	ctx := context.Background()
@@ -185,22 +219,6 @@ func TestExpandGroupRuleNoGroupsPassthrough(t *testing.T) {
 	out := expandGroupRule(r, nil)
 	if len(out) != 1 || out[0] != r {
 		t.Fatal("non-group rule should pass through unchanged")
-	}
-}
-
-func TestToDNSLabel(t *testing.T) {
-	cases := map[string]string{
-		"Laptop":        "laptop",
-		"my host.local": "my-host-local",
-		"--weird--":     "weird",
-	}
-	for in, want := range cases {
-		if got := toDNSLabel(in); got != want {
-			t.Errorf("toDNSLabel(%q) = %q, want %q", in, got, want)
-		}
-	}
-	if got := toDNSLabel(""); got == "" || len(got) < 5 {
-		t.Errorf("empty hostname should get a generated label, got %q", got)
 	}
 }
 

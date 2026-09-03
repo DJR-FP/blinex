@@ -146,7 +146,8 @@ func (s *Server) updatePeer(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Groups []string `json:"groups"`
+		Groups   []string `json:"groups"`
+		Hostname *string  `json:"hostname"` // nil = not touching the name; a groups-only PUT omits this key entirely
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -161,6 +162,18 @@ func (s *Server) updatePeer(c *gin.Context) {
 	// Every peer is always in Default — enforce it here too, not just at
 	// enrollment, so the dashboard (or any other caller) can't remove it.
 	peer.Groups = ensureDefaultGroup(req.Groups)
+	if req.Hostname != nil {
+		name := strings.TrimSpace(*req.Hostname)
+		if name == "" || len(name) > 63 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "hostname must be 1-63 characters"})
+			return
+		}
+		peer.Hostname = name
+		// Keep the Magic DNS name in sync with the display name — that's the
+		// point of naming a device, so you can actually reach it as
+		// <name>.blinex afterward.
+		peer.DNSLabel = domain.ToDNSLabel(name)
+	}
 	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
 		log.Error().Err(err).Msg("updatePeer")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})

@@ -82,7 +82,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   peers: {
     list: () => request<{ peers: Peer[] }>('/peers'),
-    update: (key: string, payload: { groups: string[] }) =>
+    update: (key: string, payload: { groups: string[]; hostname?: string }) =>
       request<Peer>(`/peers/${encodeURIComponent(key)}`, {
         method: 'PUT',
         body: JSON.stringify(payload),

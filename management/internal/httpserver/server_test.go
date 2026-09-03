@@ -192,6 +192,64 @@ func TestUpdatePeerAlwaysKeepsDefaultGroup(t *testing.T) {
 	}
 }
 
+func TestUpdatePeerRenamesHostnameAndSyncsDNSLabel(t *testing.T) {
+	s, st, a := newTestServer()
+	_ = st.SavePeer(nil, &domain.Peer{
+		ID: "1", AccountID: "default", WGPubKey: "k1",
+		Groups: []string{domain.DefaultGroupName}, Hostname: "laptop-42", DNSLabel: "laptop-42",
+	})
+	rec := do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{
+		"groups": []string{domain.DefaultGroupName}, "hostname": "Alice's Laptop",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	p, _ := st.GetPeer(nil, "k1")
+	if p.Hostname != "Alice's Laptop" {
+		t.Fatalf("hostname not updated: got %q", p.Hostname)
+	}
+	if p.DNSLabel != "alice-s-laptop" {
+		t.Fatalf("DNS label not resynced with new name: got %q", p.DNSLabel)
+	}
+}
+
+// Omitting "hostname" entirely (e.g. a groups-only update from the Groups
+// modal) must not touch the name — only an explicit rename request should.
+func TestUpdatePeerOmittedHostnameLeavesNameUnchanged(t *testing.T) {
+	s, st, a := newTestServer()
+	_ = st.SavePeer(nil, &domain.Peer{
+		ID: "1", AccountID: "default", WGPubKey: "k1",
+		Groups: []string{domain.DefaultGroupName}, Hostname: "laptop-42", DNSLabel: "laptop-42",
+	})
+	rec := do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{"groups": []string{domain.DefaultGroupName, "web"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	p, _ := st.GetPeer(nil, "k1")
+	if p.Hostname != "laptop-42" || p.DNSLabel != "laptop-42" {
+		t.Fatalf("name changed on a groups-only update: hostname=%q dns_label=%q", p.Hostname, p.DNSLabel)
+	}
+}
+
+func TestUpdatePeerRejectsEmptyOrOverlongHostname(t *testing.T) {
+	s, st, a := newTestServer()
+	_ = st.SavePeer(nil, &domain.Peer{ID: "1", AccountID: "default", WGPubKey: "k1", Groups: []string{domain.DefaultGroupName}})
+
+	rec := do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{"groups": []string{domain.DefaultGroupName}, "hostname": "   "})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for blank hostname, got %d", rec.Code)
+	}
+
+	overlong := ""
+	for i := 0; i < 64; i++ {
+		overlong += "a"
+	}
+	rec = do(s, "PUT", "/api/v1/peers/k1", adminToken(a), map[string]any{"groups": []string{domain.DefaultGroupName}, "hostname": overlong})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for 64-char hostname, got %d", rec.Code)
+	}
+}
+
 func TestDeletePeerReleasesIP(t *testing.T) {
 	s, st, a := newTestServer()
 	_ = st.SavePeer(nil, &domain.Peer{ID: "1", AccountID: "default", WGPubKey: "k1"})

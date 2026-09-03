@@ -17,9 +17,17 @@ func New() *Manager {
 	return &Manager{peers: make(map[string]*commonv1.Peer)}
 }
 
+// Update pairs a peer's previous and new state. Old is what callers need to
+// clean up (e.g. removing a stale DNS record for a hostname/dns_label that
+// no longer applies) before applying New.
+type Update struct {
+	Old *commonv1.Peer
+	New *commonv1.Peer
+}
+
 // Diff computes which peers were added, updated, and removed compared to the
 // current set. Returns slices of peers in each category.
-func (m *Manager) Diff(incoming []*commonv1.Peer) (added, updated, removed []*commonv1.Peer) {
+func (m *Manager) Diff(incoming []*commonv1.Peer) (added []*commonv1.Peer, updated []Update, removed []*commonv1.Peer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -33,7 +41,7 @@ func (m *Manager) Diff(incoming []*commonv1.Peer) (added, updated, removed []*co
 		if existing, ok := m.peers[p.WgPubKey]; !ok {
 			added = append(added, p)
 		} else if existing.Ip != p.Ip || existing.Hostname != p.Hostname || !allowedIPsEqual(existing.AllowedIps, p.AllowedIps) {
-			updated = append(updated, p)
+			updated = append(updated, Update{Old: existing, New: p})
 		}
 	}
 
