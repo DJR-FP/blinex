@@ -61,12 +61,23 @@ func runInstall(args []string) {
 	setupKey := fs.String("setup-key", "", "enrollment key from the Setup Keys page (required)")
 	mgmtURL := fs.String("management-url", "", "management server address, host:50051 (required)")
 	sigURL := fs.String("signal-url", "", "signal server address, host:10000 (required)")
+	stunURL := fs.String("stun-url", "", "STUN/TURN server, e.g. stun:host:3478 — strongly recommended (see below)")
+	turnUser := fs.String("turn-user", "", "TURN long-term credential username")
+	turnPass := fs.String("turn-pass", "", "TURN long-term credential password")
 	_ = fs.Parse(args)
 
 	if *setupKey == "" || *mgmtURL == "" || *sigURL == "" {
 		fmt.Fprintln(os.Stderr, "error: -setup-key, -management-url, and -signal-url are all required")
 		fs.Usage()
 		os.Exit(1)
+	}
+	if *stunURL == "" || *turnUser == "" || *turnPass == "" {
+		fmt.Println("warning: -stun-url/-turn-user/-turn-pass not fully set — this device will fall")
+		fmt.Println("back to Google's public STUN server with no TURN relay at all. Without a TURN")
+		fmt.Println("candidate, ICE has nothing to fall back on if direct hole-punching fails (e.g.")
+		fmt.Println("behind a symmetric NAT), and this device will be stuck on the signal-relay path")
+		fmt.Println("indefinitely. Pass all three, matching your other agents' config, to fix this.")
+		fmt.Println()
 	}
 	fmt.Println("note: this binary is not code-signed. Windows Defender's real-time")
 	fmt.Println("protection may flag and remove it and the service it creates — a service")
@@ -77,7 +88,7 @@ func runInstall(args []string) {
 	fmt.Println("Do not ship an unsigned build to real users for this reason.")
 	fmt.Println()
 
-	if err := installService(*setupKey, *mgmtURL, *sigURL); err != nil {
+	if err := installService(*setupKey, *mgmtURL, *sigURL, *stunURL, *turnUser, *turnPass); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -196,10 +207,16 @@ Usage:
 
   Windows only, run as Administrator:
   blinex-agent install -setup-key <key> -management-url <host:50051> -signal-url <host:10000>
+                        [-stun-url stun:<host:3478> -turn-user <user> -turn-pass <pass>]
                                       install as a Windows Service: starts on
                                       boot and restarts automatically on a
                                       crash; Stop-Service/net stop still works
-                                      normally and does not trigger a restart
+                                      normally and does not trigger a restart.
+                                      Pass the STUN/TURN flags to match your
+                                      other agents' config — omitting them
+                                      leaves this device with no TURN relay
+                                      candidate for ICE, which can prevent it
+                                      from ever forming a direct connection
   blinex-agent uninstall             stop and remove the service
 
 Status/peers/routes query the running agent via its control socket

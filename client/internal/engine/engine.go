@@ -145,6 +145,19 @@ func (e *Engine) Run(ctx context.Context) error {
 		LocalIp:     localOutboundIP(),
 	}
 
+	// Netstack peers: clean up a DNS override left stuck by a previous
+	// unclean shutdown *before* attempting enrollment — verified live that
+	// this deadlock is real, not theoretical: a revert-on-shutdown failure
+	// (Windows tears down the CIM/WMI provider it depends on before a
+	// service finishes cleanup) can leave every adapter pointed at the
+	// agent's own resolver with nothing listening yet, which breaks the
+	// DNS resolution enrollment itself needs — and ApplyGlobal's own
+	// recovery never gets a chance to run again until *after* a successful
+	// enrollment, so nothing here would ever self-heal on its own.
+	if e.wg.NetstackMode() {
+		dnsconfig.RecoverStaleGlobalOverride()
+	}
+
 	loginResp, err := e.enrollWithRetry(ctx, meta)
 	if err != nil {
 		return fmt.Errorf("enrollment failed: %w", err)

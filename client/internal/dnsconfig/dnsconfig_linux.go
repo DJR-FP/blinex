@@ -130,6 +130,32 @@ func ApplyGlobal(resolverAddr string) {
 	log.Info().Str("resolver", resolverAddr).Msg("dnsconfig: system DNS now routed through the agent (global override)")
 }
 
+// RecoverStaleGlobalOverride restores /etc/resolv.conf from a leftover
+// backup file *before* enrollment is attempted. Cheap defense-in-depth: raw
+// file writes here are much less likely to race with a shutdown than the
+// Windows implementation's PowerShell/CIM calls, but the same class of
+// deadlock is possible in principle (stale resolv.conf breaks the DNS
+// resolution enrollment itself needs, and ApplyGlobal's own recovery never
+// runs again until after a successful enrollment). Call this once at
+// startup, before the first enrollment attempt.
+func RecoverStaleGlobalOverride() {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	backup, err := os.ReadFile(resolvBackupPath)
+	if err != nil {
+		return // no leftover state — nothing to recover
+	}
+	if err := os.WriteFile("/etc/resolv.conf", backup, 0644); err != nil {
+		log.Warn().Err(err).Msg("dnsconfig: failed to recover stale /etc/resolv.conf at startup")
+		return
+	}
+	log.Info().Msg("dnsconfig: recovered /etc/resolv.conf left stuck by a previous unclean shutdown")
+	// Deliberately not removing the backup file — see the Windows
+	// implementation's comment; ApplyGlobal reuses it as the source of
+	// truth once this startup's own enrollment succeeds.
+}
+
 // RevertGlobal undoes ApplyGlobal on a clean shutdown.
 func RevertGlobal() {
 	globalMu.Lock()

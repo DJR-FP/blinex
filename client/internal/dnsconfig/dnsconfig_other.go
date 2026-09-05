@@ -24,3 +24,5 @@ func ApplyGlobal(_ string) {
 }
 
 func RevertGlobal() {}
+
+func RecoverStaleGlobalOverride() {}

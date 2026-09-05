@@ -16,6 +16,23 @@ import (
 
 const defaultMTU = 1420
 
+// wgLogger wires wireguard-go's own internal logger (handshake attempts,
+// failures, keepalives — none of which go through our own log calls at all)
+// into zerolog instead of device.NewLogger's hardcoded os.Stdout. That
+// default is silently lost for any process with no attached console — a
+// Windows Service, in particular — which made a real connectivity problem
+// (packets arriving over a "connected" relay but never completing a
+// handshake) impossible to diagnose: the transport-level logs all looked
+// healthy, and wireguard-go's own errors, the one place that would have
+// shown the actual failure, were going nowhere. Verbose (not just Error) so
+// handshake attempts/completions are visible, not only failures.
+func wgLogger() *device.Logger {
+	return &device.Logger{
+		Verbosef: func(format string, args ...any) { log.Debug().Msgf("[wg] "+format, args...) },
+		Errorf:   func(format string, args ...any) { log.Error().Msgf("[wg] "+format, args...) },
+	}
+}
+
 // Manager manages a userspace WireGuard device whose UDP transport is provided
 // by per-peer ICE connections (via RelayBind).
 type Manager struct {
@@ -53,7 +70,7 @@ func New(ifaceName string, privKey wgtypes.Key) (*Manager, error) {
 	}
 
 	bind := NewRelayBind()
-	logger := device.NewLogger(device.LogLevelError, "[wg] ")
+	logger := wgLogger()
 	dev := device.NewDevice(tunDev, bind, logger)
 
 	privHex := hex.EncodeToString(privKey[:])
@@ -133,7 +150,7 @@ func (m *Manager) initNetstack(cidr string) error {
 		return err
 	}
 
-	logger := device.NewLogger(device.LogLevelError, "[wg] ")
+	logger := wgLogger()
 	dev := device.NewDevice(tunDev, m.bind, logger)
 
 	privHex := hex.EncodeToString(m.privKey[:])

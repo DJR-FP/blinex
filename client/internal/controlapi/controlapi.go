@@ -78,6 +78,7 @@ func Serve(socketPath string, provider func() Status) (func(), error) {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 	_ = os.Chmod(socketPath, 0o600)
+	grantSocketAccess(socketPath)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, _ *http.Request) {

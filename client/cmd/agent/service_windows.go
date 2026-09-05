@@ -12,6 +12,7 @@ import (
 
 	"github.com/blinex/client/internal/config"
 	"github.com/blinex/client/internal/engine"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -24,6 +25,13 @@ const serviceName = "BlinexAgent"
 // no env vars from a user's shell session) reads them back from.
 var serviceConfigPath = filepath.Join(os.Getenv("ProgramData"), "blinex", "agent.json")
 
+// serviceLogPath is where the running service's logs go. A Windows Service
+// has no attached console, so the zerolog output the foreground/interactive
+// path relies on (stderr) goes nowhere — without this, every log line from
+// a running service is silently discarded, which is exactly what made an
+// earlier live connectivity problem impossible to diagnose.
+var serviceLogPath = filepath.Join(os.Getenv("ProgramData"), "blinex", "agent.log")
+
 func isWindowsService() bool {
 	is, err := svc.IsWindowsService()
 	return err == nil && is
@@ -32,6 +40,15 @@ func isWindowsService() bool {
 // runAsService is the Windows Service entry point: it registers with the
 // Service Control Manager and blocks until the SCM tells it to stop.
 func runAsService() {
+	if err := os.MkdirAll(filepath.Dir(serviceLogPath), 0755); err == nil {
+		if f, err := os.OpenFile(serviceLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			log.Logger = log.Output(zerolog.ConsoleWriter{Out: f, NoColor: true, TimeFormat: "2006-01-02 15:04:05"})
+		}
+	}
+	// If the log file couldn't be opened, fall through and run anyway with
+	// zerolog's default (still-silent) writer — a service that can't log is
+	// far better than one that fails to start over a logging problem.
+
 	if err := svc.Run(serviceName, &winService{}); err != nil {
 		log.Fatal().Err(err).Msg("service failed")
 	}
@@ -99,15 +116,21 @@ func (m *winService) Execute(_ []string, r <-chan svc.ChangeRequest, changes cha
 // Stop-Service/net stop is honored immediately and does NOT trigger a
 // restart, same as systemd's Restart=on-failure not firing on
 // `systemctl stop`. Run once, elevated (Administrator).
-func installService(setupKey, managementURL, signalURL string) error {
+func installService(setupKey, managementURL, signalURL, stunURL, turnUser, turnPass string) error {
 	if err := os.MkdirAll(filepath.Dir(serviceConfigPath), 0755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 	cfgJSON := struct {
-		ManagementURL string `json:"management_url"`
-		SignalURL     string `json:"signal_url"`
-		SetupKey      string `json:"setup_key"`
-	}{managementURL, signalURL, setupKey}
+		ManagementURL string   `json:"management_url"`
+		SignalURL     string   `json:"signal_url"`
+		SetupKey      string   `json:"setup_key"`
+		StunURLs      []string `json:"stun_urls,omitempty"`
+		TurnUser      string   `json:"turn_user,omitempty"`
+		TurnPass      string   `json:"turn_pass,omitempty"`
+	}{ManagementURL: managementURL, SignalURL: signalURL, SetupKey: setupKey, TurnUser: turnUser, TurnPass: turnPass}
+	if stunURL != "" {
+		cfgJSON.StunURLs = []string{stunURL}
+	}
 	data, err := json.MarshalIndent(cfgJSON, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)

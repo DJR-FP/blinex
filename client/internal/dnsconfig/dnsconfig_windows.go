@@ -102,6 +102,41 @@ func ApplyGlobal(resolverAddr string) {
 	log.Info().Int("adapters", applied).Str("resolver", resolverAddr).Msg("dnsconfig: system DNS now routed through the agent (global override)")
 }
 
+// RecoverStaleGlobalOverride restores adapter DNS from a leftover backup
+// file *before* enrollment is attempted — breaking a real deadlock verified
+// live: if a previous run's revert-on-shutdown fails (confirmed happening —
+// Windows tears down the CIM/WMI provider these PowerShell calls need before
+// giving services a chance to finish cleanup), adapters stay pointed at
+// 127.0.0.1 with nothing listening. ApplyGlobal's own recovery only helps
+// once the agent has already enrolled — but enrolling needs to resolve the
+// management server's hostname, which is exactly what stale DNS breaks, so
+// nothing here ever reaches ApplyGlobal again on its own. Call this once at
+// startup, before the first enrollment attempt.
+func RecoverStaleGlobalOverride() {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	backup, err := readBackup()
+	if err != nil {
+		return // no leftover state — nothing to recover
+	}
+	for _, a := range backup {
+		if len(a.ServerAddresses) == 0 {
+			exec.Command("powershell", "-NoProfile", "-Command",
+				"Set-DnsClientServerAddress -InterfaceIndex "+strconv.Itoa(a.InterfaceIndex)+" -ResetServerAddresses").Run() //nolint:errcheck
+			continue
+		}
+		if err := setAdapterDNS(a.InterfaceIndex, a.ServerAddresses); err != nil {
+			log.Warn().Err(err).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to recover stale adapter DNS at startup")
+		}
+	}
+	log.Info().Msg("dnsconfig: recovered adapter DNS left stuck by a previous unclean shutdown")
+	// Deliberately not removing the backup file: ApplyGlobal will run again
+	// shortly (after this startup's own enrollment succeeds) and re-apply
+	// the override using this same backup as the source of truth for the
+	// real original settings, exactly as it would on any other restart.
+}
+
 // RevertGlobal undoes ApplyGlobal on a clean shutdown.
 func RevertGlobal() {
 	globalMu.Lock()
@@ -115,15 +150,33 @@ func RevertGlobal() {
 	if err != nil {
 		return // never applied, or already reverted
 	}
+	// Track success per adapter rather than assuming it: during a system
+	// shutdown/reboot, Windows tears down the CIM/WMI provider these
+	// PowerShell calls depend on before giving services a chance to finish
+	// cleanup, so a revert attempt can fail here — verified live (a
+	// CimJob_BrokenCimSession error mid-reboot left every adapter stuck on
+	// 127.0.0.1 with nothing behind it, breaking DNS resolution entirely on
+	// the next boot, for as long as nobody noticed). Only clear the backup
+	// file when every adapter actually reverted, so a startup that finds a
+	// leftover backup — because a previous revert partially failed — still
+	// has the real original settings to restore instead of losing them.
+	allOK := true
 	for _, a := range backup {
+		var restoreErr error
 		if len(a.ServerAddresses) == 0 {
-			exec.Command("powershell", "-NoProfile", "-Command",
-				"Set-DnsClientServerAddress -InterfaceIndex "+strconv.Itoa(a.InterfaceIndex)+" -ResetServerAddresses").Run() //nolint:errcheck
-			continue
+			restoreErr = exec.Command("powershell", "-NoProfile", "-Command",
+				"Set-DnsClientServerAddress -InterfaceIndex "+strconv.Itoa(a.InterfaceIndex)+" -ResetServerAddresses").Run()
+		} else {
+			restoreErr = setAdapterDNS(a.InterfaceIndex, a.ServerAddresses)
 		}
-		if err := setAdapterDNS(a.InterfaceIndex, a.ServerAddresses); err != nil {
-			log.Warn().Err(err).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to restore adapter DNS")
+		if restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to restore adapter DNS")
+			allOK = false
 		}
+	}
+	if !allOK {
+		log.Warn().Msg("dnsconfig: DNS restore incomplete — leaving the backup file in place so the next startup can retry with the real original settings")
+		return
 	}
 	_ = os.Remove(backupPath)
 	log.Info().Msg("dnsconfig: restored original adapter DNS settings")
