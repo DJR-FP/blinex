@@ -154,7 +154,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// DNS resolution enrollment itself needs — and ApplyGlobal's own
 	// recovery never gets a chance to run again until *after* a successful
 	// enrollment, so nothing here would ever self-heal on its own.
-	if e.wg.NetstackMode() {
+	if e.wg.UsesGlobalDNS() {
 		dnsconfig.RecoverStaleGlobalOverride()
 	}
 
@@ -171,13 +171,14 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Point the OS at our own Magic DNS resolver, the way NetBird/Tailscale's
 	// MagicDNS does — without this, mesh hostnames and domain filtering only
-	// work if a user manually reconfigures their system DNS. Kernel-TUN peers
-	// get a per-link override tied to the interface's own lifetime (crash-safe
-	// for free — see dnsconfig.Apply). Netstack peers have no such interface,
-	// so they get a global override instead, backed by systemd's
-	// Restart=on-failure for crash recovery rather than OS-level teardown —
-	// see dnsconfig.ApplyGlobal.
-	if !e.wg.NetstackMode() {
+	// work if a user manually reconfigures their system DNS. Linux's
+	// kernel-TUN gets a per-link override tied to the interface's own
+	// lifetime (crash-safe for free — see dnsconfig.Apply); every other
+	// platform (including Windows, kernel-TUN or not — it has no per-link
+	// DNS implementation) gets a global override instead, backed by the
+	// service manager's crash-restart for recovery rather than OS-level
+	// teardown — see dnsconfig.ApplyGlobal.
+	if !e.wg.UsesGlobalDNS() {
 		dnsconfig.Apply(e.cfg.WGInterface, dnsListenAddr)
 		defer dnsconfig.Revert(e.cfg.WGInterface)
 	} else {

@@ -51,3 +51,10 @@ func (m *Manager) cleanupKernelTUN() {
 		_ = netlink.LinkDel(link)
 	}
 }
+
+// UsesGlobalDNS reports whether the OS's DNS resolver needs a global
+// override rather than a per-link one. Linux's kernel-TUN interface gets a
+// per-link override instead (see dnsconfig_linux.go's Apply) — crash-safe
+// for free, since the OS tears down the link's resolver config along with
+// the interface itself.
+func (m *Manager) UsesGlobalDNS() bool { return false }
