@@ -3,6 +3,7 @@ bin/
 *.exe
 *.exe~
 *.dll
+!client/internal/wgmgr/winassets/*.dll
 *.so
 *.dylib
 
