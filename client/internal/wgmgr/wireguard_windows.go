@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/blinex/client/internal/acl"
 	"github.com/rs/zerolog/log"
 )
 
@@ -64,11 +65,15 @@ func (m *Manager) setKernelAddress(cidr string) error {
 	return fmt.Errorf("configuring interface %q after retries: %w", m.ifaceName, lastErr)
 }
 
-// cleanupKernelTUN is a no-op on Windows: closing the wintun adapter (done
-// by the tun.Device's own Close, called before this) already tears down its
-// IP configuration along with it — unlike Linux, where the kernel interface
-// itself persists unless explicitly deleted.
-func (m *Manager) cleanupKernelTUN() {}
+// cleanupKernelTUN unregisters this interface's ACL filter (see
+// tun_windows.go's createTUN) so a later reinstall doesn't reuse a stale
+// entry — the adapter's own IP configuration needs no equivalent cleanup
+// here: closing it (done by the tun.Device's own Close, called before this)
+// already tears that down, unlike Linux where the kernel interface itself
+// persists unless explicitly deleted.
+func (m *Manager) cleanupKernelTUN() {
+	acl.UnregisterFilter(m.ifaceName)
+}
 
 // UsesGlobalDNS reports whether the OS's DNS resolver needs a global
 // override rather than a per-link one. Always true on Windows, kernel-TUN

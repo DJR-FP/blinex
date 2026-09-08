@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/blinex/client/internal/acl"
 	"github.com/rs/zerolog/log"
 	"golang.zx2c4.com/wireguard/tun"
 )
@@ -15,12 +16,22 @@ import (
 // createTUN creates a real Windows network adapter via the wintun driver,
 // giving Windows peers a normal kernel interface — and OS-level reachability
 // (ping, RDP, any app) to the mesh — instead of the userspace-only netstack
-// every Windows agent used until now.
+// every Windows agent used until now. The device is wrapped in an ACL
+// packet filter and registered under ifaceName so acl_windows.go's
+// EnsureChain/ApplyRules (called from engine.go exactly like the Linux
+// iptables path) can reach it — see aclfilter_windows.go for why Windows
+// Firewall itself can't substitute for the iptables BLINEX-ACL chain here.
 func createTUN(ifaceName string) (tun.Device, error) {
 	if err := ensureWintunDLL(); err != nil {
 		return nil, fmt.Errorf("wintun.dll: %w", err)
 	}
-	return tun.CreateTUN(ifaceName, defaultMTU)
+	inner, err := tun.CreateTUN(ifaceName, defaultMTU)
+	if err != nil {
+		return nil, err
+	}
+	filtered := newACLFilterTUN(inner)
+	acl.RegisterFilter(ifaceName, filtered)
+	return filtered, nil
 }
 
 // isTUNUnavailable is always true on Windows: any failure to create the
