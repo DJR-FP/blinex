@@ -375,6 +375,67 @@ immediately and does not trigger a restart.
 
 ---
 
+## 7. Windows Kernel-TUN Parity (v0.21.0+)
+
+v0.20.0 gave Windows a real kernel interface via wintun, which flipped
+`NetstackMode()` to false — the same flag that used to gate ACL enforcement,
+subnet routing and exit-node activation onto Linux-only iptables/netlink code.
+v0.21.0 restores all three on Windows: ACLs are filtered in `aclFilterTUN`
+(which wraps the wintun device and evaluates policy on every decrypted packet
+on its way into the OS), and routing/NAT go through `New-NetRoute` /
+`New-NetNat`. These tests confirm a Windows peer is not silently unprotected.
+
+### 7a. ACL enforcement on a Windows peer ✅ *verified 2026-09-09, v0.21.1*
+Run from a **second** peer (`SRC`) against the Windows peer's mesh IP (`WIN`).
+
+1. Baseline — with the seeded `Default allow` rule in place, `ping <WIN>` from
+   `SRC` succeeds. Pick a third peer as an untouched control and ping it too.
+2. Add a rule scoped to the Windows peer alone (rules accept a bare IP or CIDR
+   in `src`/`dst`, not just `group:`): priority `100`, src `*`, dst `<WIN>`,
+   protocol `all`, action **deny**.
+3. Wait ~8s for the sync push, then re-ping.
+   ✅ **Pass:** `<WIN>` is **100% blocked** while the control peer still
+   answers at 0% loss. If the control also drops, the rule was scoped too
+   broadly and the test proves nothing.
+4. Delete the rule, wait ~8s, ping again.
+   ✅ **Pass:** traffic **fully recovers**. Traffic that stays blocked means a
+   stale deny is still installed — the Windows sibling of the Linux stale-rule
+   bug (BUG 1) fixed in v0.11.2.
+
+> Use ICMP as the probe: `aclFilterAllows` classifies IP protocol 1 as `icmp`,
+> so an `all`-protocol rule covers it. A Windows peer typically has no mesh
+> port open to probe with TCP.
+
+### 7b. Watch for a flapping data path first
+Before trusting **any** Windows data-path result, confirm the link is stable —
+a flapping path produces intermittent loss that reads exactly like an ACL drop:
+
+```bash
+journalctl -u blinex-agent --since "5 min ago" | grep -c "stalled, reverted"
+```
+
+✅ **Pass:** `0`. A repeating `upgraded from relay` / `stalled, reverted` cycle
+means traffic is being thrown onto a direct path that cannot carry it (see the
+promotion policy in `client/README.md`). Fixed in v0.21.1; if it reappears,
+stop and fix that before interpreting anything else.
+
+### 7c. Subnet routing / exit node from Windows — ⚠️ NOT YET TESTED
+`routing_windows.go` is verified only by compilation and the platform-agnostic
+unit tests; the `New-NetNat` / `New-NetRoute` paths have never been exercised
+live. Follow §2 and §3 with the Windows peer as the **gateway**, and check on
+the Windows host itself:
+
+```powershell
+Get-NetNat                       # masquerade for the advertised subnet
+Get-NetRoute -AddressFamily IPv4 # advertised prefixes, exit-node /1 splits
+```
+
+> As in §3, when testing the exit-node **consumer** path over a remote session,
+> pin a `/32` host route for your client IP via the original gateway first, or
+> the default route flips into the tunnel and your session drops.
+
+---
+
 ## What to capture if something fails
 
 - Agent: `journalctl -u blinex-agent -n 50 --no-pager`
@@ -383,6 +444,11 @@ immediately and does not trigger a restart.
 - Sync state: `docker compose logs management --tail 30` on the control plane
 - Dashboard connection state: does the device still show green?
 
+> Windows peers in kernel (wintun) mode enforce ACLs in userspace too as of
+> v0.21.0 — in `aclFilterTUN`, wrapping the tun device rather than through
+> Windows Firewall, whose block rules always beat allow rules and so cannot
+> express an ordered default-deny chain. See §7.
+>
 > Netstack-mode peers (no `/dev/net/tun`) enforce ACLs in userspace (v0.14.0+,
 > see the callout at the top of this doc) rather than iptables, and act as a
 > **subnet router or exit node** (v0.12.0+) via the same userspace gVisor

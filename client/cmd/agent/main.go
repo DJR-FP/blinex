@@ -144,7 +144,7 @@ func runCLI(cmd string, args []string) {
 }
 
 func printStatus(st controlapi.Status) {
-	fmt.Printf("Bline-X agent  v%s\n", st.Version)
+	fmt.Printf("Bline-X agent  %s\n", st.Version)
 	fmt.Printf("  Hostname:   %s\n", st.Hostname)
 	fmt.Printf("  Mesh IP:    %s\n", st.SelfIP)
 	fmt.Printf("  Interface:  %s (%s mode)\n", st.Interface, st.Mode)

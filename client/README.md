@@ -110,6 +110,21 @@ mentor-pi02-1    100.64.0.3   mentor-pi02-1.blinex   relay
 connection or **relayed** through the signal server. Override the socket with
 `-socket <path>` if you changed it.
 
+Relay is the reliable default; a direct path is an optimization the agent only
+adopts once it has proven itself. Every 3 seconds the agent sends a padded probe
+over the ICE connection, and a path must answer **three consecutive** probes
+before any traffic moves onto it. If a promoted path then misses a probe, traffic
+falls straight back to relay and the path is not reconsidered for 15 seconds,
+doubling up to 5 minutes on repeated failures (forgiven after two minutes of
+stability).
+
+That deliberate hysteresis is why a peer can sit on `relay` even though ICE
+reports a connection: some NAT bindings pass small packets but drop real traffic,
+and promoting such a path black-holes data until the next probe times out. If you
+expect `direct` and consistently get `relay`, the direct path is genuinely not
+carrying traffic — check that UDP is not being filtered inbound at either end
+rather than assuming it is a reporting bug.
+
 ## Uninstalling
 
 Pre-built uninstall binaries are included in each [release](https://github.com/DJR-FP/blinex-agent/releases). The uninstaller removes the agent binary, service, config, state, and platform-specific resources.

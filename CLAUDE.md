@@ -118,6 +118,21 @@ Adding new persistence operations: update the interface, then implement in both 
 6. Both trickle ICE CANDIDATE messages throughout
 7. Once connected: `ice.Manager.OnConnected` callback fires → `wg.UpdateEndpoint(peerKey, endpoint, conn)`
 
+## Data path: relay vs direct
+
+ICE connecting is **not** the same as traffic using the direct path. Relay is
+the reliable default; `client/internal/peerlink/link.go` promotes a peer to the
+direct path only after its padded probes get three consecutive answers, and
+demotes with exponential backoff (15s→5min) the moment one is missed.
+
+This hysteresis is deliberate and must not be relaxed into "promote as soon as
+a probe answers". Some NAT bindings pass small packets while dropping real
+traffic; promoting such a path black-holes data until the probe times out. That
+regression (fixed in v0.21.1) oscillated every 12 seconds and cost 33–100%
+packet loss. The promotion policy is isolated in a timer-free
+`probeState.observe()` precisely so it can be unit tested — change it there,
+with tests, not inline in the probe loop.
+
 ## DNS
 
 The agent runs a UDP DNS server on `127.0.0.1:53535`. Queries for `*.blinex` domains resolve to peer IPs. All other queries are forwarded to `8.8.8.8:53`.
