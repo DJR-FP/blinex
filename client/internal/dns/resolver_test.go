@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -195,5 +196,55 @@ func TestSetBlocklistReplacesWholesale(t *testing.T) {
 	}
 	if r.isBlocked("first.example.") {
 		t.Fatal("first.example should no longer be blocked after SetBlocklist replaced the list")
+	}
+}
+
+// TestListenAnswersOnEveryBoundAddress covers the multi-address property the
+// Linux per-link DNS override depends on: the resolver has to answer on the
+// peer's mesh IP as well as loopback, because systemd-resolved queries a
+// link's DNS server on a link-bound socket and can never reach 127.0.0.1
+// through it.
+func TestListenAnswersOnEveryBoundAddress(t *testing.T) {
+	r := New("127.0.0.1:0", "blinex", "127.0.0.1:9")
+	r.Upsert("laptop", "100.64.0.7")
+
+	// Two distinct loopback addresses stand in for "loopback plus mesh IP";
+	// the resolver treats any bound address the same way.
+	first, err := r.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("first Listen: %v", err)
+	}
+	defer first.Close()
+	second, err := r.Listen("127.0.0.2:0")
+	if err != nil {
+		t.Fatalf("second Listen: %v", err)
+	}
+	defer second.Close()
+
+	for _, c := range []io.Closer{first, second} {
+		addr := c.(net.PacketConn).LocalAddr().String()
+		resp := queryA(t, addr, "laptop.blinex.")
+		if len(resp.Answers) != 1 {
+			t.Fatalf("%s: expected 1 answer, got %d", addr, len(resp.Answers))
+		}
+		a := resp.Answers[0].Body.(*dnsmessage.AResource)
+		if got := net.IP(a.A[:]).String(); got != "100.64.0.7" {
+			t.Fatalf("%s: wrong IP %s", addr, got)
+		}
+	}
+}
+
+// TestListenReportsBindFailure is the property that keeps a bind failure from
+// taking the whole host's DNS down: the caller applies the system-wide
+// override only after Listen has confirmed the socket is up, so the failure
+// has to surface synchronously rather than in a goroutine's log line.
+func TestListenReportsBindFailure(t *testing.T) {
+	r := New("127.0.0.1:0", "blinex", "127.0.0.1:9")
+	// 100.64.0.7 is not an address on this host — the same shape of failure as
+	// a mesh IP that hasn't been assigned to the interface yet.
+	c, err := r.Listen("100.64.0.7:53535")
+	if err == nil {
+		c.Close()
+		t.Fatal("expected Listen to fail binding an address the host does not have")
 	}
 }

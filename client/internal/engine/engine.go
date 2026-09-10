@@ -34,10 +34,46 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// dnsListenAddr is where the Magic DNS resolver listens — shared with
-// dnsconfig.Apply so the OS is pointed at the same address the resolver
-// actually answers on.
+// dnsListenAddr is the resolver's loopback address. It is what the *global*
+// DNS override (netstack peers, Windows) points at, and what a hand-configured
+// resolver setting is documented to use.
 const dnsListenAddr = "127.0.0.1:53535"
+
+// dnsPort is the port the resolver answers on, at every address it binds.
+const dnsPort = 53535
+
+// meshDNSAddr is the address the resolver must answer on for Linux's per-link
+// systemd-resolved override to reach it: the peer's own mesh IP.
+//
+// A loopback address cannot be used there, however natural it looks. A
+// link-scoped DNS server is queried on a socket bound to that link, so
+// resolved emits the query *out blinex0* — verified with tcpdump:
+//
+//	blinex0 Out IP 100.64.0.9.54307 > 127.0.0.1.53535: UDP, length 40
+//
+// which is encrypted into the tunnel and lost, since 127.0.0.1 is not a mesh
+// address. The resolver never sees the query, resolved retries and downgrades
+// (UDP+EDNS0 → UDP → TCP → ...) until every lookup times out, and because "~."
+// makes this link the *only* DNS route, all name resolution on the host dies —
+// not just mesh names. The peer's own mesh IP has a `local ... scope host`
+// entry pointing at blinex0, so the kernel delivers it locally even on a
+// link-bound socket, which is exactly the property needed here (and why
+// Tailscale answers on 100.100.100.100 rather than 127.0.0.1).
+// selfIP is the CIDR the management server assigned ("100.64.0.9/32"), so the
+// prefix has to come off before it can be used as a bind address.
+func meshDNSAddr(selfIP string) (string, error) {
+	addr, err := netip.ParsePrefix(selfIP)
+	if err != nil {
+		// Tolerate a bare IP too — nothing guarantees the server keeps
+		// sending a prefix, and this must not be the thing that breaks DNS.
+		ip, ipErr := netip.ParseAddr(selfIP)
+		if ipErr != nil {
+			return "", fmt.Errorf("parsing own mesh address %q: %w", selfIP, err)
+		}
+		return netip.AddrPortFrom(ip, dnsPort).String(), nil
+	}
+	return netip.AddrPortFrom(addr.Addr(), dnsPort).String(), nil
+}
 
 // exitNodeState holds the routing state installed when an exit node is active.
 type exitNodeState struct {
@@ -178,9 +214,32 @@ func (e *Engine) Run(ctx context.Context) error {
 	// DNS implementation) gets a global override instead, backed by the
 	// service manager's crash-restart for recovery rather than OS-level
 	// teardown — see dnsconfig.ApplyGlobal.
+	//
+	// Every listener is bound *before* the override goes in, and the override
+	// is skipped if its address failed to bind. The ordering is not cosmetic:
+	// the override makes this resolver the system's only DNS route, so
+	// pointing at a socket that isn't up yet — or never comes up — takes the
+	// whole host's name resolution down rather than just Magic DNS.
+	if c, err := e.dns.Listen(dnsListenAddr); err != nil {
+		log.Warn().Err(err).Msg("Magic DNS loopback listener unavailable")
+	} else {
+		defer c.Close() //nolint:errcheck
+	}
+
 	if !e.wg.UsesGlobalDNS() {
-		dnsconfig.Apply(e.cfg.WGInterface, dnsListenAddr)
-		defer dnsconfig.Revert(e.cfg.WGInterface)
+		meshAddr, err := meshDNSAddr(e.selfIP)
+		if err != nil {
+			log.Error().Err(err).Msg("Magic DNS mesh address unusable — leaving system DNS untouched")
+		} else if c, err := e.dns.Listen(meshAddr); err != nil {
+			// Leave system DNS alone. Magic DNS is degraded (it still answers
+			// on loopback for anyone pointed there by hand); working DNS for
+			// the rest of the host matters more.
+			log.Error().Err(err).Str("addr", meshAddr).Msg("Magic DNS mesh listener failed to bind — leaving system DNS untouched")
+		} else {
+			defer c.Close() //nolint:errcheck
+			dnsconfig.Apply(e.cfg.WGInterface, meshAddr)
+			defer dnsconfig.Revert(e.cfg.WGInterface)
+		}
 	} else {
 		dnsconfig.ApplyGlobal(dnsListenAddr)
 		defer dnsconfig.RevertGlobal()
@@ -212,13 +271,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		Str("peer_id", loginResp.PeerId).
 		Bool("netstack", e.wg.NetstackMode()).
 		Msg("enrolled")
-
-	// Magic DNS.
-	go func() {
-		if err := e.dns.Serve(); err != nil && ctx.Err() == nil {
-			log.Error().Err(err).Msg("DNS resolver error")
-		}
-	}()
 
 	// Malicious-domain blocklist: polled on its own slow cadence rather than
 	// pushed via Sync — the compiled feed can run into the tens of thousands

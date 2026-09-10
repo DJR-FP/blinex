@@ -1,7 +1,9 @@
 package dns
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -84,7 +86,8 @@ func (r *Resolver) Remove(label string) {
 	delete(r.records, fqdn)
 }
 
-// Serve starts the UDP listener and blocks until it returns an error.
+// Serve starts the UDP listener on the resolver's configured address and
+// blocks until it returns an error.
 func (r *Resolver) Serve() error {
 	pc, err := net.ListenPacket("udp", r.listenAddr)
 	if err != nil {
@@ -92,7 +95,34 @@ func (r *Resolver) Serve() error {
 	}
 	defer pc.Close()
 	log.Info().Str("addr", r.listenAddr).Str("suffix", r.suffix).Msg("DNS resolver started")
+	return r.serveLoop(pc)
+}
 
+// Listen binds addr and answers queries there in the background, returning
+// once the socket is bound. The same resolver can answer on several addresses
+// at once — a mesh peer needs at least two, since the address the OS can
+// actually reach differs by platform (see dnsconfig).
+//
+// It deliberately reports bind failure synchronously rather than serving in a
+// goroutine and logging: pointing the OS at this resolver makes it the
+// system's *only* DNS route, so a caller must be able to confirm the socket
+// is up before doing that. Binding after the override is in place, and
+// failing, takes all name resolution on the host down with it.
+func (r *Resolver) Listen(addr string) (io.Closer, error) {
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("DNS listen %s: %w", addr, err)
+	}
+	log.Info().Str("addr", addr).Str("suffix", r.suffix).Msg("DNS resolver listening")
+	go func() {
+		if err := r.serveLoop(pc); err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Error().Err(err).Str("addr", addr).Msg("DNS listener stopped")
+		}
+	}()
+	return pc, nil
+}
+
+func (r *Resolver) serveLoop(pc net.PacketConn) error {
 	buf := make([]byte, 4096)
 	for {
 		n, addr, err := pc.ReadFrom(buf)

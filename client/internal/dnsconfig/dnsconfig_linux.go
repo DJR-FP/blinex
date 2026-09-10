@@ -18,9 +18,18 @@ import (
 
 // Apply makes iface (a real kernel WireGuard interface) the system's default
 // DNS route via systemd-resolved: resolverAddr answers every query, not just
-// mesh hostnames. It is a no-op (with a warning) if resolvectl isn't
-// available — e.g. a distro without systemd-resolved — rather than a hard
-// failure, since the mesh itself works fine without it.
+// mesh hostnames.
+//
+// resolverAddr MUST be reachable from a socket bound to iface — in practice
+// the peer's own mesh IP, never a loopback address. systemd-resolved queries a
+// link's DNS server on a link-bound socket, so 127.0.0.1 here is emitted into
+// the tunnel and lost, and since "~." below makes this link the only DNS
+// route, that silently kills all name resolution on the host. See
+// engine.meshDNSAddr for the full diagnosis.
+//
+// It is a no-op (with a warning) if resolvectl isn't available — e.g. a distro
+// without systemd-resolved — rather than a hard failure, since the mesh itself
+// works fine without it.
 //
 // Crash safety: this is deliberately per-link (blinex0), not a global
 // override. If the agent dies uncleanly, the kernel destroys the
