@@ -419,6 +419,41 @@ means traffic is being thrown onto a direct path that cannot carry it (see the
 promotion policy in `client/README.md`). Fixed in v0.21.1; if it reappears,
 stop and fix that before interpreting anything else.
 
+### 7z. Windows ↔ Linux parity matrix (as of v0.21.3, 2026-09-14)
+
+Verified live against VirtWin (Win10 Pro 22H2, wintun kernel-TUN) with a Linux
+peer. "Verified" means exercised end to end on both platforms in one session,
+not inferred from shared code.
+
+| Capability | Linux | Windows | Evidence |
+|---|---|---|---|
+| Kernel TUN interface | ✅ | ✅ | `blinex0` wintun adapter, mesh route present |
+| Magic DNS (mesh names) | ✅ | ✅ | `cloud4.blinex` resolves on both |
+| DNS forwarding (public names) | ✅ | ✅ | `google.com` resolves through the agent |
+| Malicious-domain blocklist | ✅ | ✅ | same feed version (358 domains), NXDOMAIN on both |
+| ACL enforcement, traffic to host | ✅ | ✅ | ICMP-deny rule blocked ping, left SSH working |
+| ACL teardown, no stale deny | ✅ | ✅ | removing the rule fully restored ICMP |
+| Subnet routing — consumer | ✅ | ⬜ | not yet exercised with Windows as consumer |
+| Subnet routing — forwarding | ✅ | ✅ | `pktmon` shows the packet leaving the physical NIC |
+| Subnet routing — NAT | ✅ | ❌ | **blocked**: WinNAT absent, see §7c |
+| Exit node — gateway | ✅ | ⬜ | blocked behind the same NAT gap |
+| Exit node — consumer | ✅ | ⬜ | needs out-of-band access first, see below |
+
+**Why the exit-node consumer test is gated.** It installs `0.0.0.0/1` +
+`128.0.0.0/1`, moving the default route into the tunnel. If the host-route
+pinning in `routing_windows.go` is wrong — the same never-exercised file that
+held four bugs before v0.21.3 — the tunnel collapses and takes the only path
+to the machine with it. Confirmed live by stopping the agent: with the mesh
+down the host was unreachable by every route, so there is no way to diagnose
+or recover except a timed watchdog. Do not run it without either a forwarded
+SSH port that does not traverse the mesh, or physical access.
+
+**A watchdog is not a substitute.** A scheduled task that restores state after
+N minutes (see §7c) makes a failed test survivable, and it earned its place
+here — it caught a bad bind address and restored a stopped agent, on the
+minute, `lastResult=0`. But it recovers on a timer; it cannot let you look at
+a broken box, and it cannot help when the agent itself is what is wedged.
+
 ### 7c. Subnet routing / exit node from Windows — ⚠️ PARTIALLY VERIFIED (v0.21.3)
 First run live on 2026-09-14 (VirtWin, Win10 Pro 22H2, wintun kernel-TUN,
 advertising `192.168.100.0/24` to a Linux consumer). It failed in four silent
