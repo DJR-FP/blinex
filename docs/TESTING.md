@@ -433,7 +433,7 @@ not inferred from shared code.
 | Malicious-domain blocklist | ✅ | ✅ | same feed version (358 domains), NXDOMAIN on both |
 | ACL enforcement, traffic to host | ✅ | ✅ | ICMP-deny rule blocked ping, left SSH working |
 | ACL teardown, no stale deny | ✅ | ✅ | removing the rule fully restored ICMP |
-| Subnet routing — consumer | ✅ | ✅ | route installed, traffic flows, clean withdrawal |
+| Subnet routing — consumer | ✅ | ✅ | works with **no** hand-written ACL rule (v0.21.4) |
 | Subnet routing — forwarding | ✅ | ✅ | `pktmon` shows the packet leaving the physical NIC |
 | Subnet routing — NAT | ✅ | ❌ | **blocked**: WinNAT absent, see §7c |
 | Exit node — gateway | ✅ | ⬜ | blocked behind the same NAT gap |
@@ -447,8 +447,15 @@ Serving is the half that needs NAT; consuming needs only `New-NetRoute`, which
 works. Document the limitation as "a Windows peer cannot act as a subnet
 router or exit node", not as "subnet routing does not work on Windows".
 
-**Return traffic from a routed subnet needs an explicit ACL rule — on both
-platforms.** This is not a Windows quirk. ACL rules expand to *mesh peer IPs*,
+**Fixed in v0.21.4 — this section describes the bug, not current behaviour.**
+Verified after the fix, with only the stock `group:Default` rule present: a
+Windows consumer reached both the gateway's own LAN address and a host beyond
+it at ~15 ms, and unsolicited traffic from that same subnet (`ping -I 10.0.0.23`
+at the peer's mesh IP) was still dropped — so the stateful accept admits the
+return direction and nothing more.
+
+**The original bug: return traffic from a routed subnet needed an explicit ACL
+rule — on both platforms.** This is not a Windows quirk. ACL rules expand to *mesh peer IPs*,
 so a reply from `10.0.0.1` to a peer's mesh address matches no rule and hits
 default-deny. On Windows that is `aclFilterAllows`; on Linux it is the
 `BLINEX-ACL` chain, which INPUT jumps to for `-i blinex0` and which has no
@@ -466,6 +473,16 @@ every other peer's internet traffic through that host. Do not enable one on a
 shared account without telling the other peers' owners first. This is also a
 product gap worth closing: Tailscale and NetBird both let a device choose
 whether to use an available exit node.
+
+**Out-of-band access (added 2026-09-14).** A WAN port on the site firewall now
+forwards to VirtWin's `192.168.100.47:22`, reachable as
+`donald@109.153.147.7`. This is not a convenience — it changes what is safe to
+test. It does not traverse the mesh, so it survives the agent being stopped,
+the tunnel collapsing, or a default route moved into the tunnel. It is also
+dramatically faster: a 20 MB agent binary took **3.5 s** over it, after the
+same file repeatedly failed to cross the relayed mesh path at all, including a
+chunked upload whose first 2 MB piece failed six attempts over ten minutes.
+Prefer it for any deployment or diagnosis.
 
 **Why the exit-node consumer test is gated.** It installs `0.0.0.0/1` +
 `128.0.0.0/1`, moving the default route into the tunnel. If the host-route
