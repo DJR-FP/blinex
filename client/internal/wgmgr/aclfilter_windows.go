@@ -82,12 +82,16 @@ func (f *aclFilterTUN) Write(bufs [][]byte, offset int) (int, error) {
 		return f.Device.Write(bufs, offset)
 	}
 
+	// Resolve once per batch, not per packet: this is the WireGuard receive
+	// path, and even a cache hit takes a mutex.
+	locals := f.localAddrs()
+
 	allowed := bufs[:0:0]
 	for _, b := range bufs {
 		if len(b) <= offset {
 			continue
 		}
-		if aclFilterAllowsFor(b[offset:], rules, f.localAddrs()) {
+		if aclFilterAllowsFor(b[offset:], rules, locals) {
 			allowed = append(allowed, b)
 		}
 	}

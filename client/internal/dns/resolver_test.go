@@ -248,3 +248,60 @@ func TestListenReportsBindFailure(t *testing.T) {
 		t.Fatal("expected Listen to fail binding an address the host does not have")
 	}
 }
+
+// TestForwardAnswersServfailWhenUpstreamIsDead pins that a dead upstream
+// produces an answer rather than silence. Dropping the query made every
+// lookup stall for the client's full timeout and made the resolver
+// indistinguishable from a dead one while debugging — a `dig` that times out
+// cannot tell you whether the name was blocked, forwarded, or lost.
+func TestForwardAnswersServfailWhenUpstreamIsDead(t *testing.T) {
+	// Port 9 is discard: reachable, never answers.
+	r := New("127.0.0.1:0", "blinex", "127.0.0.1:9")
+	c, err := r.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	addr := c.(net.PacketConn).LocalAddr().String()
+
+	conn, err := net.Dial("udp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	var q dnsmessage.Message
+	q.Header.ID = 4242
+	q.Header.RecursionDesired = true
+	q.Questions = []dnsmessage.Question{{
+		Name:  dnsmessage.MustNewName("nowhere.example."),
+		Type:  dnsmessage.TypeA,
+		Class: dnsmessage.ClassINET,
+	}}
+	packed, err := q.Pack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(packed); err != nil {
+		t.Fatal(err)
+	}
+
+	// The forward path waits 5s on the upstream before giving up, so allow
+	// more than that here.
+	_ = conn.SetReadDeadline(time.Now().Add(8 * time.Second))
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("no reply from resolver with a dead upstream: %v", err)
+	}
+	var resp dnsmessage.Message
+	if err := resp.Unpack(buf[:n]); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.ID != q.Header.ID {
+		t.Errorf("reply ID = %d, want %d", resp.Header.ID, q.Header.ID)
+	}
+	if resp.Header.RCode != dnsmessage.RCodeServerFailure {
+		t.Errorf("RCode = %v, want SERVFAIL", resp.Header.RCode)
+	}
+}

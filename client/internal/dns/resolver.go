@@ -186,19 +186,24 @@ func (r *Resolver) handle(pc net.PacketConn, addr net.Addr, raw []byte) {
 	}
 
 	// Forward to upstream resolver.
-	r.forward(pc, addr, raw)
+	r.forward(pc, addr, raw, msg)
 }
 
 // respondNXDOMAIN answers a query for a blocked domain with NXDOMAIN rather
 // than forwarding it — the standard "this domain does not exist" response,
 // so callers fail the same way they would for a genuinely dead domain.
 func (r *Resolver) respondNXDOMAIN(pc net.PacketConn, addr net.Addr, msg dnsmessage.Message) {
+	r.respondCode(pc, addr, msg, dnsmessage.RCodeNameError)
+}
+
+// respondCode answers a query with a bare header carrying rcode and no records.
+func (r *Resolver) respondCode(pc net.PacketConn, addr net.Addr, msg dnsmessage.Message, rcode dnsmessage.RCode) {
 	resp := dnsmessage.Message{
 		Header: dnsmessage.Header{
 			ID:                 msg.ID,
 			Response:           true,
 			Authoritative:      true,
-			RCode:              dnsmessage.RCodeNameError,
+			RCode:              rcode,
 			RecursionDesired:   msg.RecursionDesired,
 			RecursionAvailable: false,
 		},
@@ -210,19 +215,35 @@ func (r *Resolver) respondNXDOMAIN(pc net.PacketConn, addr net.Addr, msg dnsmess
 	}
 }
 
-func (r *Resolver) forward(pc net.PacketConn, addr net.Addr, raw []byte) {
+// forward relays a query upstream and copies the reply back.
+//
+// Every failure path answers SERVFAIL rather than returning silently. Dropping
+// the query looks identical to the resolver being down: the client waits out
+// its own timeout (5s for glibc, longer for some stubs) and only then tries
+// anything else, which turns one unreachable upstream into multi-second stalls
+// on every lookup. It also makes the resolver look broken while debugging —
+// a `dig` that times out says nothing about whether the query was blocked,
+// forwarded, or lost. SERVFAIL is the honest answer and lets callers fail over
+// immediately.
+func (r *Resolver) forward(pc net.PacketConn, addr net.Addr, raw []byte, msg dnsmessage.Message) {
 	conn, err := net.Dial("udp", r.upstream)
 	if err != nil {
+		log.Debug().Err(err).Str("upstream", r.upstream).Msg("DNS upstream dial failed")
+		r.respondCode(pc, addr, msg, dnsmessage.RCodeServerFailure)
 		return
 	}
 	defer conn.Close()
 	if _, err := conn.Write(raw); err != nil {
+		log.Debug().Err(err).Str("upstream", r.upstream).Msg("DNS upstream write failed")
+		r.respondCode(pc, addr, msg, dnsmessage.RCodeServerFailure)
 		return
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil {
+		log.Debug().Err(err).Str("upstream", r.upstream).Msg("DNS upstream did not answer")
+		r.respondCode(pc, addr, msg, dnsmessage.RCodeServerFailure)
 		return
 	}
 	_, _ = pc.WriteTo(buf[:n], addr)
