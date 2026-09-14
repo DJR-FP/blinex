@@ -433,11 +433,39 @@ not inferred from shared code.
 | Malicious-domain blocklist | ✅ | ✅ | same feed version (358 domains), NXDOMAIN on both |
 | ACL enforcement, traffic to host | ✅ | ✅ | ICMP-deny rule blocked ping, left SSH working |
 | ACL teardown, no stale deny | ✅ | ✅ | removing the rule fully restored ICMP |
-| Subnet routing — consumer | ✅ | ⬜ | not yet exercised with Windows as consumer |
+| Subnet routing — consumer | ✅ | ✅ | route installed, traffic flows, clean withdrawal |
 | Subnet routing — forwarding | ✅ | ✅ | `pktmon` shows the packet leaving the physical NIC |
 | Subnet routing — NAT | ✅ | ❌ | **blocked**: WinNAT absent, see §7c |
 | Exit node — gateway | ✅ | ⬜ | blocked behind the same NAT gap |
-| Exit node — consumer | ✅ | ⬜ | needs out-of-band access first, see below |
+| Exit node — consumer | ✅ | ⬜ | see "exit node is account-wide" below |
+
+**Windows can *use* subnet routes, it just cannot *serve* them.** Verified with
+a Linux gateway advertising `10.0.0.0/24`: Windows installed
+`blinex0 10.0.0.0/24`, reached both the gateway's own LAN address and a host
+beyond it (true transit, ~15 ms), and removed the route cleanly on withdrawal.
+Serving is the half that needs NAT; consuming needs only `New-NetRoute`, which
+works. Document the limitation as "a Windows peer cannot act as a subnet
+router or exit node", not as "subnet routing does not work on Windows".
+
+**Return traffic from a routed subnet needs an explicit ACL rule — on both
+platforms.** This is not a Windows quirk. ACL rules expand to *mesh peer IPs*,
+so a reply from `10.0.0.1` to a peer's mesh address matches no rule and hits
+default-deny. On Windows that is `aclFilterAllows`; on Linux it is the
+`BLINEX-ACL` chain, which INPUT jumps to for `-i blinex0` and which has no
+conntrack ESTABLISHED accept before its final DROP. The gateway-side capture
+showed replies leaving correctly while the consumer silently dropped them;
+adding `10.0.0.0/24 → <peer mesh IP> allow` made it work immediately. Until
+the ACL model covers return traffic (stateful match, or an implicit allow for
+subnets the peer has installed a route for), every subnet-route consumer needs
+a hand-written return rule.
+
+**Exit node activation is account-wide, not per-peer.** `engine.go` activates
+exit-node routing on *every* peer as soon as *any* peer advertises
+`0.0.0.0/0` — there is no per-device opt-in. Enabling one to test it will pull
+every other peer's internet traffic through that host. Do not enable one on a
+shared account without telling the other peers' owners first. This is also a
+product gap worth closing: Tailscale and NetBird both let a device choose
+whether to use an available exit node.
 
 **Why the exit-node consumer test is gated.** It installs `0.0.0.0/1` +
 `128.0.0.0/1`, moving the default route into the tunnel. If the host-route
