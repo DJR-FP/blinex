@@ -92,3 +92,51 @@ func TestACLFilterAllows(t *testing.T) {
 		t.Error("truncated packet must pass through unfiltered, not panic")
 	}
 }
+
+// TestACLFilterTransitBypassesPolicy pins the Linux-parity rule that made
+// subnet routing work on Windows: only traffic addressed to this host is
+// policed. Forwarded traffic is accepted, because on Linux
+// routing_linux.go's `iptables -I FORWARD -i blinex0 -j ACCEPT` sits above
+// the jump to BLINEX-ACL and accepts it before the chain runs.
+//
+// Before this, the Windows filter policed transit too, and since rules
+// expand to mesh peer IPs a LAN destination matched nothing and was
+// default-denied — every forwarded packet dropped, verified live.
+func TestACLFilterTransitBypassesPolicy(t *testing.T) {
+	// A policy that allows only mesh peer → mesh peer, as group expansion produces.
+	rules := []*commonv1.Rule{{
+		Src: "100.64.0.9", Dst: "100.64.0.10", Protocol: "all", Action: "allow", Enabled: true,
+	}}
+	locals := map[netip.Addr]struct{}{
+		netip.MustParseAddr("100.64.0.10"):    {},
+		netip.MustParseAddr("192.168.100.47"): {},
+	}
+
+	icmpPkt := func(src, dst netip.Addr) []byte { return buildIPv4Packet(t, src, dst, 1, 0) }
+
+	lanHost := netip.MustParseAddr("192.168.100.1")
+	mesh := netip.MustParseAddr("100.64.0.10")
+	peer := netip.MustParseAddr("100.64.0.9")
+	stranger := netip.MustParseAddr("100.64.0.8")
+
+	// Transit to the advertised LAN: not addressed to us, so not policed.
+	if !aclFilterAllowsFor(icmpPkt(peer, lanHost), rules, locals) {
+		t.Error("forwarded LAN traffic was dropped; subnet routing cannot work")
+	}
+	// Still policed when it terminates here.
+	if !aclFilterAllowsFor(icmpPkt(peer, mesh), rules, locals) {
+		t.Error("allowed mesh→this-host traffic was dropped")
+	}
+	if aclFilterAllowsFor(icmpPkt(stranger, mesh), rules, locals) {
+		t.Error("traffic to this host from a peer with no matching rule was allowed")
+	}
+	// A local non-mesh address of ours is still "to us", so still policed —
+	// matching Linux, where such a packet goes to INPUT, not FORWARD.
+	if aclFilterAllowsFor(icmpPkt(peer, netip.MustParseAddr("192.168.100.47")), rules, locals) {
+		t.Error("traffic to our own LAN address bypassed policy; it should be policed like INPUT")
+	}
+	// With no local set known, fail closed: police everything.
+	if aclFilterAllowsFor(icmpPkt(peer, lanHost), rules, nil) {
+		t.Error("with an unknown local-address set the filter must fail closed")
+	}
+}

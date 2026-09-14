@@ -21,6 +21,33 @@ import (
 // matching Linux: the `iptables` binary BLINEX-ACL is installed under never
 // sees IPv6 packets either.
 func aclFilterAllows(pkt []byte, rules []*commonv1.Rule) bool {
+	return aclFilterAllowsFor(pkt, rules, nil)
+}
+
+// aclFilterAllowsFor is aclFilterAllows with the set of this host's own IPv4
+// addresses, so transit traffic can be told apart from traffic terminating
+// here.
+//
+// Only packets addressed TO this host are policed. That is not a loosening
+// invented here — it is what Linux has always actually done, and Windows
+// diverging from it is why subnet routing failed live on VirtWin with every
+// forwarded packet silently dropped. acl_linux.go hooks BLINEX-ACL into both
+// INPUT and FORWARD, but routing_linux.go's AddMasquerade *inserts* blanket
+// accepts at the head of FORWARD:
+//
+//	iptables -I FORWARD -i blinex0 -j ACCEPT
+//	iptables -I FORWARD -o blinex0 -j ACCEPT
+//
+// `-I` puts them above the `-A FORWARD ... -j BLINEX-ACL` jump, so on a Linux
+// subnet router forwarded traffic is accepted before the ACL chain ever sees
+// it. The Windows filter sits on the decrypted-packet path instead, where it
+// sees transit and local traffic alike, and policed both — and since rules
+// expand to mesh peer IPs, nothing matches a LAN destination and default-deny
+// dropped it.
+//
+// Passing a nil/empty locals set polices everything, which keeps the
+// conservative behaviour for callers that cannot enumerate local addresses.
+func aclFilterAllowsFor(pkt []byte, rules []*commonv1.Rule, locals map[netip.Addr]struct{}) bool {
 	if len(pkt) < 20 || pkt[0]>>4 != 4 {
 		return true
 	}
@@ -32,6 +59,15 @@ func aclFilterAllows(pkt []byte, rules []*commonv1.Rule) bool {
 	dst, ok2 := netip.AddrFromSlice(pkt[16:20])
 	if !ok1 || !ok2 {
 		return true
+	}
+
+	// Transit: destined somewhere other than this host, i.e. being forwarded
+	// out to an advertised subnet. Linux accepts these ahead of the ACL chain;
+	// match that rather than default-denying them.
+	if len(locals) > 0 {
+		if _, isLocal := locals[dst]; !isLocal {
+			return true
+		}
 	}
 
 	var proto string

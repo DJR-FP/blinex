@@ -3,7 +3,10 @@
 package wgmgr
 
 import (
+	"net"
+	"net/netip"
 	"sync"
+	"time"
 
 	commonv1 "github.com/blinex/gen/common/v1"
 	"golang.zx2c4.com/wireguard/tun"
@@ -32,6 +35,10 @@ type aclFilterTUN struct {
 	mu       sync.RWMutex
 	rules    []*commonv1.Rule
 	rulesSet bool // false until the first ApplyRules call — see Write()
+
+	localMu    sync.Mutex
+	localCache map[netip.Addr]struct{}
+	localAt    time.Time
 }
 
 func newACLFilterTUN(inner tun.Device) *aclFilterTUN {
@@ -80,7 +87,7 @@ func (f *aclFilterTUN) Write(bufs [][]byte, offset int) (int, error) {
 		if len(b) <= offset {
 			continue
 		}
-		if aclFilterAllows(b[offset:], rules) {
+		if aclFilterAllowsFor(b[offset:], rules, f.localAddrs()) {
 			allowed = append(allowed, b)
 		}
 	}
@@ -93,4 +100,42 @@ func (f *aclFilterTUN) Write(bufs [][]byte, offset int) (int, error) {
 	// the caller sees no error, the packet just never arrives.
 	_, err := f.Device.Write(allowed, offset)
 	return len(bufs), err
+}
+
+// localAddrsTTL bounds how long a cached local-address set is trusted. The
+// set changes when an interface gains or loses an address — DHCP renewal,
+// the wintun device coming up — so it cannot be captured once at startup,
+// but enumerating it per packet would be absurd.
+const localAddrsTTL = 10 * time.Second
+
+// localAddrs returns this host's IPv4 addresses, cached. Used to tell traffic
+// terminating here (policed) from transit being forwarded to an advertised
+// subnet (passed through, as on Linux — see aclFilterAllowsFor).
+//
+// On enumeration failure it returns nil, which makes aclFilterAllowsFor
+// police every packet: failing closed is the safe direction, since the worst
+// case is dropped forwarded traffic rather than unpoliced delivery.
+func (f *aclFilterTUN) localAddrs() map[netip.Addr]struct{} {
+	f.localMu.Lock()
+	defer f.localMu.Unlock()
+	if f.localCache != nil && time.Since(f.localAt) < localAddrsTTL {
+		return f.localCache
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	set := make(map[netip.Addr]struct{}, len(addrs))
+	for _, a := range addrs {
+		n, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ip, ok := netip.AddrFromSlice(n.IP.To4()); ok {
+			set[ip] = struct{}{}
+		}
+	}
+	f.localCache = set
+	f.localAt = time.Now()
+	return set
 }

@@ -86,18 +86,38 @@ func ApplyGlobal(resolverAddr string) {
 		}
 	}
 
-	backup, err := readBackup()
+	// Apply to the adapters that are up RIGHT NOW, not to the ones recorded in
+	// the backup. An InterfaceIndex is not stable: the wintun adapter is
+	// recreated on every agent start and takes a new index each time, and a
+	// reboot can renumber the physical ones too. Driving the apply loop off
+	// the backup meant that on the second run onwards every call targeted an
+	// index that no longer existed —
+	//
+	//	Set-DnsClientServerAddress : No MSFT_DNSClientServerAddress objects
+	//	found with property 'InterfaceIndex' equal to '16'
+	//
+	// — so no adapter was configured at all. The backup's job is to record
+	// what to put back; it is not a list of what to change.
+	current, err := queryAdapterDNS()
 	if err != nil {
-		log.Warn().Err(err).Msg("dnsconfig: could not read DNS backup, skipping DNS takeover")
+		log.Warn().Err(err).Msg("dnsconfig: could not enumerate adapters, skipping DNS takeover")
 		return
 	}
 	applied := 0
-	for _, a := range backup {
+	for _, a := range current {
 		if err := setAdapterDNS(a.InterfaceIndex, []string{"127.0.0.1"}); err != nil {
 			log.Warn().Err(err).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to set adapter DNS")
 			continue
 		}
 		applied++
+	}
+	// Never report a takeover that did not happen. This previously logged
+	// success unconditionally, so a run that configured zero adapters still
+	// printed "system DNS now routed through the agent" — Magic DNS and
+	// domain filtering were entirely inert while the log said otherwise.
+	if applied == 0 {
+		log.Error().Int("adapters", len(current)).Msg("dnsconfig: DNS takeover failed on every adapter — system DNS is unchanged, Magic DNS and domain filtering are NOT active")
+		return
 	}
 	log.Info().Int("adapters", applied).Str("resolver", resolverAddr).Msg("dnsconfig: system DNS now routed through the agent (global override)")
 }
@@ -120,16 +140,7 @@ func RecoverStaleGlobalOverride() {
 	if err != nil {
 		return // no leftover state — nothing to recover
 	}
-	for _, a := range backup {
-		if len(a.ServerAddresses) == 0 {
-			exec.Command("powershell", "-NoProfile", "-Command",
-				"Set-DnsClientServerAddress -InterfaceIndex "+strconv.Itoa(a.InterfaceIndex)+" -ResetServerAddresses").Run() //nolint:errcheck
-			continue
-		}
-		if err := setAdapterDNS(a.InterfaceIndex, a.ServerAddresses); err != nil {
-			log.Warn().Err(err).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to recover stale adapter DNS at startup")
-		}
-	}
+	restoreBackup(backup, "recover stale")
 	log.Info().Msg("dnsconfig: recovered adapter DNS left stuck by a previous unclean shutdown")
 	// Deliberately not removing the backup file: ApplyGlobal will run again
 	// shortly (after this startup's own enrollment succeeds) and re-apply
@@ -160,26 +171,63 @@ func RevertGlobal() {
 	// file when every adapter actually reverted, so a startup that finds a
 	// leftover backup — because a previous revert partially failed — still
 	// has the real original settings to restore instead of losing them.
-	allOK := true
-	for _, a := range backup {
-		var restoreErr error
-		if len(a.ServerAddresses) == 0 {
-			restoreErr = exec.Command("powershell", "-NoProfile", "-Command",
-				"Set-DnsClientServerAddress -InterfaceIndex "+strconv.Itoa(a.InterfaceIndex)+" -ResetServerAddresses").Run()
-		} else {
-			restoreErr = setAdapterDNS(a.InterfaceIndex, a.ServerAddresses)
-		}
-		if restoreErr != nil {
-			log.Warn().Err(restoreErr).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to restore adapter DNS")
-			allOK = false
-		}
-	}
+	allOK := restoreBackup(backup, "restore")
 	if !allOK {
 		log.Warn().Msg("dnsconfig: DNS restore incomplete — leaving the backup file in place so the next startup can retry with the real original settings")
 		return
 	}
 	_ = os.Remove(backupPath)
 	log.Info().Msg("dnsconfig: restored original adapter DNS settings")
+}
+
+// resolveAdapterIndex re-resolves a backed-up adapter to its CURRENT interface
+// index, matching on the alias (a name an operator chose, stable across
+// reboots) rather than trusting the index recorded at backup time, which is
+// not stable — see the comment in ApplyGlobal.
+//
+// The second return value distinguishes "this adapter is gone" from "lookup
+// failed". A vanished adapter is an ordinary outcome, not an error: the
+// backup routinely contains a previous run's wintun device, which no longer
+// exists by the time a restore runs. Treating that as a failure used to make
+// restoreBackup report partial failure forever, so the backup file could
+// never be cleared and every startup re-ran recovery against it.
+func resolveAdapterIndex(alias string) (int, bool) {
+	script := "(Get-NetAdapter -Name " + psQuote(alias) + " -ErrorAction SilentlyContinue).InterfaceIndex"
+	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
+	if err != nil {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
+}
+
+// restoreBackup puts every adapter in the backup back to its recorded DNS
+// servers. Returns false if an adapter that still exists could not be
+// restored — the caller keeps the backup file in that case.
+func restoreBackup(backup []adapterDNS, what string) bool {
+	allOK := true
+	for _, a := range backup {
+		idx, ok := resolveAdapterIndex(a.InterfaceAlias)
+		if !ok {
+			log.Debug().Str("adapter", a.InterfaceAlias).Msg("dnsconfig: backed-up adapter no longer present, nothing to restore")
+			continue
+		}
+		var restoreErr error
+		if len(a.ServerAddresses) == 0 {
+			restoreErr = exec.Command("powershell", "-NoProfile", "-Command",
+				"Set-DnsClientServerAddress -InterfaceIndex "+strconv.Itoa(idx)+" -ResetServerAddresses").Run()
+		} else {
+			restoreErr = setAdapterDNS(idx, a.ServerAddresses)
+		}
+		if restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("adapter", a.InterfaceAlias).Msg("dnsconfig: failed to " + what + " adapter DNS")
+			allOK = false
+		}
+	}
+	return allOK
 }
 
 func readBackup() ([]adapterDNS, error) {
@@ -229,6 +277,12 @@ func setAdapterDNS(interfaceIndex int, servers []string) error {
 // e.g. ["127.0.0.1"] -> @('127.0.0.1'). Every value here comes from our own
 // relay address or from IPs PowerShell itself reported back to us (never
 // free-form user input), so a plain single-quote escape is sufficient.
+// psQuote renders one PowerShell single-quoted string literal. Adapter
+// aliases are operator-chosen and can contain spaces or apostrophes.
+func psQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+}
+
 func psStringArray(values []string) string {
 	quoted := make([]string, len(values))
 	for i, v := range values {

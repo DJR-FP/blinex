@@ -465,13 +465,31 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		// otherwise tear the masquerade down so withdrawing all advertised routes
 		// stops NATting (mirror of the ACL reconcile — never leave stale state).
 		if selfRoutes := routesByGateway[selfKey]; len(selfRoutes) > 0 {
-			if err := routing.EnableForwarding(); err != nil {
-				log.Warn().Err(err).Msg("failed to enable IP forwarding")
+			// Report what actually happened. This used to log "advertising
+			// routes — forwarding enabled" unconditionally, even when both
+			// calls below had just failed: on Windows that produced a
+			// confident success line while forwarding stayed off and no NAT
+			// existed, so the gateway silently black-holed every packet it
+			// was supposed to forward. A route this host cannot actually
+			// serve must not look like one it can.
+			fwdErr := routing.EnableForwarding()
+			if fwdErr != nil {
+				log.Warn().Err(fwdErr).Msg("failed to enable IP forwarding")
 			}
-			if err := routing.AddMasquerade(e.cfg.WGInterface); err != nil {
-				log.Warn().Err(err).Msg("failed to add iptables masquerade")
+			natErr := routing.AddMasquerade(e.cfg.WGInterface)
+			if natErr != nil {
+				log.Warn().Err(natErr).Msg("failed to add NAT/masquerade for forwarded mesh traffic")
 			}
-			log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding enabled")
+			switch {
+			case fwdErr == nil && natErr == nil:
+				log.Info().Strs("routes", selfRoutes).Msg("advertising routes — forwarding and NAT active")
+			case fwdErr != nil && natErr != nil:
+				log.Error().Strs("routes", selfRoutes).Msg("advertising routes but NEITHER forwarding NOR NAT could be set up — peers will route this prefix here and the traffic will be dropped")
+			case fwdErr != nil:
+				log.Error().Strs("routes", selfRoutes).Msg("advertising routes but IP forwarding could not be enabled — traffic for this prefix will be dropped")
+			default:
+				log.Error().Strs("routes", selfRoutes).Msg("advertising routes with forwarding enabled but no NAT — replies will only return if the LAN routes 100.64.0.0/10 back to this host")
+			}
 		} else {
 			routing.RemoveMasquerade(e.cfg.WGInterface)
 		}
