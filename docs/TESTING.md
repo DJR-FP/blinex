@@ -419,11 +419,33 @@ means traffic is being thrown onto a direct path that cannot carry it (see the
 promotion policy in `client/README.md`). Fixed in v0.21.1; if it reappears,
 stop and fix that before interpreting anything else.
 
-### 7c. Subnet routing / exit node from Windows — ⚠️ NOT YET TESTED
-`routing_windows.go` is verified only by compilation and the platform-agnostic
-unit tests; the `New-NetNat` / `New-NetRoute` paths have never been exercised
-live. Follow §2 and §3 with the Windows peer as the **gateway**, and check on
-the Windows host itself:
+### 7c. Subnet routing / exit node from Windows — ⚠️ PARTIALLY VERIFIED (v0.21.3)
+First run live on 2026-09-14 (VirtWin, Win10 Pro 22H2, wintun kernel-TUN,
+advertising `192.168.100.0/24` to a Linux consumer). It failed in four silent
+ways, all fixed in v0.21.3: `EnableForwarding` was a no-op stub, `New-NetNat`
+cannot run at all where `MSFT_NetNat` is unregistered (stock Win10 without
+Hyper-V/Containers), the engine logged success regardless, and the ACL filter
+default-denied every forwarded packet because it policed transit that Linux
+accepts ahead of `BLINEX-ACL`.
+
+**Where it stands:** the consumer installs the route, and the gateway now
+genuinely forwards — confirmed with `pktmon` on the gateway, the echo request
+leaving on the physical NIC as `100.64.0.9 > 192.168.100.1`. The source is
+*not* NATted, so replies do not come back and an end-to-end ping still fails.
+To finish this test you need **one** of:
+
+- **WinNAT available on the gateway** — enable the Hyper-V or Containers
+  optional feature (needs a reboot), after which `New-NetNat` works and the
+  agent NATs mesh traffic onto the LAN; or
+- **a static route on the LAN router** — `100.64.0.0/10 via <gateway LAN IP>`,
+  which makes NAT unnecessary.
+
+Until one of those is in place the agent logs, correctly, `advertising routes
+with forwarding enabled but no NAT`. The exit-node paths below remain
+unexercised.
+
+Follow §2 and §3 with the Windows peer as the **gateway**, and check on the
+Windows host itself:
 
 ```powershell
 Get-NetNat                       # masquerade for the advertised subnet
