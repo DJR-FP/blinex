@@ -5,11 +5,13 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"time"
 
 	signalv1 "github.com/blinex/gen/signal/v1"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -21,8 +23,20 @@ type Client struct {
 	selfKey string
 }
 
+// keepaliveParams matches mgmclient's — see the rationale there. The signal
+// stream needs it for the same reason: it is long-lived and idle between peer
+// events, so a NAT that drops its state leaves this client blocked in Recv()
+// with no error, and the relay path silently stops working.
+var keepaliveParams = keepalive.ClientParameters{
+	Time:                30 * time.Second,
+	Timeout:             10 * time.Second,
+	PermitWithoutStream: true,
+}
+
 func New(serverAddr, selfWGKey string, tlsCfg *tls.Config) (*Client, error) {
-	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	conn, err := grpc.NewClient(serverAddr,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
+		grpc.WithKeepaliveParams(keepaliveParams))
 	if err != nil {
 		return nil, fmt.Errorf("dial signal server: %w", err)
 	}

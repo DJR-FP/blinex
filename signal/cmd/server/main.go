@@ -3,9 +3,11 @@ package main
 import (
 	"net"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
 	signalv1 "github.com/blinex/gen/signal/v1"
@@ -17,6 +19,24 @@ import (
 )
 
 var version = "dev"
+
+// grpcKeepalive mirrors the management server's — see the rationale there.
+var grpcEnforcementPolicy = keepalive.EnforcementPolicy{
+	MinTime:             10 * time.Second,
+	PermitWithoutStream: true,
+}
+
+var grpcServerParams = keepalive.ServerParameters{
+	Time:    30 * time.Second,
+	Timeout: 10 * time.Second,
+}
+
+func grpcKeepalive() []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.KeepaliveEnforcementPolicy(grpcEnforcementPolicy),
+		grpc.KeepaliveParams(grpcServerParams),
+	}
+}
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -50,6 +70,7 @@ func main() {
 		log.Warn().Msg("signal: MGMT_JWT_SECRET not set — connections are unauthenticated")
 	}
 
+	opts = append(opts, grpcKeepalive()...)
 	s := grpc.NewServer(opts...)
 	signalv1.RegisterSignalServiceServer(s, server.New())
 	if os.Getenv("GRPC_REFLECTION") == "true" {

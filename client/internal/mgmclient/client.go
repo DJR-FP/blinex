@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"time"
 
 	commonv1 "github.com/blinex/gen/common/v1"
 	managementv1 "github.com/blinex/gen/management/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -18,8 +20,35 @@ type Client struct {
 	rpc  managementv1.ManagementServiceClient
 }
 
+// keepaliveParams makes a silently dead connection fail instead of hanging.
+//
+// gRPC sends nothing on an idle stream by default, so if the underlying TCP
+// connection dies without a FIN — a NAT or firewall evicting its state, which
+// is routine on home broadband and cloud NAT — the client blocks in Recv()
+// forever. No error, no log, no reconnect. That is exactly what happened live:
+// an agent's Sync stream went quiet and the peer stayed unreachable for nearly
+// two hours while the agent sat there believing it was connected, until it was
+// restarted by hand. The Sync stream is push-only and mostly idle, which is
+// precisely the traffic pattern NAT state eviction punishes.
+//
+// PermitWithoutStream keeps pinging when no RPC is in flight, since an idle
+// long-lived stream is the case that needs it most. Time must stay above the
+// servers' EnforcementPolicy MinTime or they answer with GOAWAY
+// ENHANCE_YOUR_CALM and drop the connection this is meant to protect.
+//
+// Detection is the whole fix: once the stream errors, Engine.Run returns and
+// the existing restart path (systemd Restart=on-failure, the Windows SCM's
+// sc failure config) reconnects from scratch.
+var keepaliveParams = keepalive.ClientParameters{
+	Time:                30 * time.Second,
+	Timeout:             10 * time.Second,
+	PermitWithoutStream: true,
+}
+
 func New(serverAddr string, tlsCfg *tls.Config) (*Client, error) {
-	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	conn, err := grpc.NewClient(serverAddr,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
+		grpc.WithKeepaliveParams(keepaliveParams))
 	if err != nil {
 		return nil, fmt.Errorf("dial management server: %w", err)
 	}
