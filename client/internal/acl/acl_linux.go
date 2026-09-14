@@ -49,6 +49,26 @@ func ApplyRules(rules []*commonv1.Rule, iface string) error {
 		return fmt.Errorf("flush %s: %w", chain, err)
 	}
 
+	// Accept replies to flows this host started, ahead of every policy rule.
+	//
+	// Without this, a peer that consumes a subnet route cannot use it: rules
+	// expand to *mesh peer IPs*, so a reply from a host inside the routed
+	// subnet (or from the internet via an exit node) matches nothing and hits
+	// the terminal DROP below. The request leaves correctly and the reply is
+	// silently discarded on arrival — verified live, and it is why consuming
+	// a subnet route used to need a hand-written return rule.
+	//
+	// Stateful rather than a blanket allow for the routed prefixes: an exit
+	// node's replies come from the whole internet, so the stateless version
+	// of this would be `-s 0.0.0.0/0 -j ACCEPT`, which is just default-deny
+	// switched off. ESTABLISHED,RELATED grants exactly the return direction
+	// of flows that policy already permitted outbound, and nothing else —
+	// unsolicited inbound traffic is still matched against the rules.
+	if err := iptablesRun("-A", chain, "-m", "conntrack",
+		"--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
+		log.Warn().Err(err).Msg("ACL conntrack accept install failed — replies from routed subnets may be dropped")
+	}
+
 	for _, r := range rules {
 		if !r.Enabled {
 			continue

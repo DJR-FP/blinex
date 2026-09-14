@@ -40,9 +40,50 @@ func TestApplyRulesEmptyFlushesChainAndDeniesByDefault(t *testing.T) {
 	if strings.Join(terminal, " ") != "-A "+chain+" -j DROP" {
 		t.Fatalf("expected a terminal default-deny with zero rules configured, got %v", *calls)
 	}
+	// The stateful accept is part of the chain's fixed scaffolding, not a
+	// policy rule — see ApplyRules. Everything between it and the terminal
+	// deny comes from the ruleset, which is empty here.
 	for _, c := range (*calls)[1 : len(*calls)-1] {
+		if len(c) > 0 && c[0] == "-A" && !isConntrackAccept(c) {
+			t.Fatalf("empty ruleset must install no policy rules besides the scaffolding, but appended: %v", c)
+		}
+	}
+}
+
+func isConntrackAccept(c []string) bool {
+	return strings.Join(c, " ") == "-A "+chain+" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+}
+
+// The stateful accept must come before any policy rule. It is what lets a peer
+// consume a subnet route at all: rules expand to mesh peer IPs, so a reply
+// from inside the routed subnet — or from the internet via an exit node —
+// matches nothing and would hit the terminal DROP. Installed after a deny
+// rule it would be unreachable for exactly the flows that need it.
+func TestApplyRulesInstallsStatefulAcceptFirst(t *testing.T) {
+	calls := captureIptables(t)
+
+	rules := []*commonv1.Rule{
+		{Src: "100.64.0.8/32", Dst: "100.64.0.7/32", Protocol: "all", Action: "deny", Enabled: true},
+	}
+	if err := ApplyRules(rules, "blinex0"); err != nil {
+		t.Fatalf("ApplyRules: %v", err)
+	}
+
+	var appends [][]string
+	for _, c := range *calls {
 		if len(c) > 0 && c[0] == "-A" {
-			t.Fatalf("empty ruleset must install no rules besides the terminal deny, but appended: %v", c)
+			appends = append(appends, c)
+		}
+	}
+	if len(appends) == 0 {
+		t.Fatal("no rules installed")
+	}
+	if !isConntrackAccept(appends[0]) {
+		t.Fatalf("first installed rule must be the stateful accept, got %v", appends[0])
+	}
+	for _, c := range appends[1:] {
+		if isConntrackAccept(c) {
+			t.Fatal("stateful accept installed more than once")
 		}
 	}
 }

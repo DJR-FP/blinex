@@ -39,10 +39,36 @@ type aclFilterTUN struct {
 	localMu    sync.Mutex
 	localCache map[netip.Addr]struct{}
 	localAt    time.Time
+
+	ct *conntrack
 }
 
 func newACLFilterTUN(inner tun.Device) *aclFilterTUN {
-	return &aclFilterTUN{Device: inner}
+	return &aclFilterTUN{Device: inner, ct: newConntrack()}
+}
+
+// Read carries packets the OS is sending out to be encrypted. They are not
+// filtered — egress policy is the receiving peer's business, and on Linux
+// BLINEX-ACL is only hooked on `-i <iface>` too — but they are recorded, so
+// Write can admit the replies. See conntrack for why that is needed.
+func (f *aclFilterTUN) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+	n, err := f.Device.Read(bufs, sizes, offset)
+	if err != nil {
+		return n, err
+	}
+	f.mu.RLock()
+	rulesSet := f.rulesSet
+	f.mu.RUnlock()
+	if !rulesSet {
+		return n, nil // nothing is being filtered yet, so nothing to track
+	}
+	for i := 0; i < n && i < len(bufs) && i < len(sizes); i++ {
+		end := offset + sizes[i]
+		if end > offset && end <= len(bufs[i]) {
+			f.ct.observeOutbound(bufs[i][offset:end])
+		}
+	}
+	return n, nil
 }
 
 // SetRules installs a new ACL policy, replacing whatever was there before.
@@ -91,7 +117,8 @@ func (f *aclFilterTUN) Write(bufs [][]byte, offset int) (int, error) {
 		if len(b) <= offset {
 			continue
 		}
-		if aclFilterAllowsFor(b[offset:], rules, locals) {
+		pkt := b[offset:]
+		if f.ct.allowInbound(pkt) || aclFilterAllowsFor(pkt, rules, locals) {
 			allowed = append(allowed, b)
 		}
 	}
