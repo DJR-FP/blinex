@@ -117,3 +117,98 @@ func TestSignalRejectsKeyChangeMidStream(t *testing.T) {
 		t.Fatal("expected stream to be rejected for mid-stream key change")
 	}
 }
+
+// TestConcurrentSendersToOnePeer is the regression for the unsynchronised
+// target.Send. Several peers relay into the same target's stream from their
+// own handler goroutines, which is exactly what a mesh does: WireGuard data
+// is carried as type=RELAY messages over these streams, so every packet from
+// every peer contends for the same target.
+//
+// grpc-go documents that SendMsg must not be called concurrently on one
+// stream. This test does not prove corruption — it passes against the
+// unsynchronised version too, and -race is unavailable in this environment
+// (no cgo toolchain). It is a smoke test that fan-in still delivers every
+// message, and a place for the contract to be stated; the serialisation in
+// peerStream.send is justified by the documented API contract, not by a
+// reproduction here.
+func TestConcurrentSendersToOnePeer(t *testing.T) {
+	conn := startServer(t)
+
+	const (
+		target  = "target-peer-key"
+		senders = 6
+		each    = 40
+	)
+
+	recvStream := openStream(t, conn, makeToken(target))
+	if err := recvStream.Send(&signalv1.Message{Key: target}); err != nil {
+		t.Fatal(err)
+	}
+	// Wait until the server has actually processed that registration, by
+	// round-tripping a message the target addresses to itself. Without this
+	// the senders can start first and every message is dropped by the
+	// "target not connected" path — which is a real production behaviour
+	// worth knowing about, but not what this test is measuring.
+	if err := recvStream.Send(&signalv1.Message{
+		Key: target, RemoteKey: target,
+		Body: &signalv1.Body{Type: signalv1.Body_RELAY},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recvStream.Recv(); err != nil {
+		t.Fatalf("target registration never took effect: %v", err)
+	}
+
+	done := make(chan struct{})
+	received := 0
+	go func() {
+		defer close(done)
+		for received < senders*each {
+			if _, err := recvStream.Recv(); err != nil {
+				return
+			}
+			received++
+		}
+	}()
+
+	sendErrs := make(chan error, senders)
+	for i := 0; i < senders; i++ {
+		key := "sender-" + string(rune('a'+i))
+		go func(key string) {
+			ctx := metadata.NewOutgoingContext(context.Background(),
+				metadata.Pairs("authorization", "Bearer "+makeToken(key)))
+			st, err := signalv1.NewSignalServiceClient(conn).Send(ctx)
+			if err != nil {
+				sendErrs <- err
+				return
+			}
+			if err := st.Send(&signalv1.Message{Key: key}); err != nil {
+				sendErrs <- err
+				return
+			}
+			for j := 0; j < each; j++ {
+				if err := st.Send(&signalv1.Message{
+					Key:       key,
+					RemoteKey: target,
+					Body:      &signalv1.Body{Type: signalv1.Body_RELAY},
+				}); err != nil {
+					sendErrs <- err
+					return
+				}
+			}
+			sendErrs <- nil
+		}(key)
+	}
+	for i := 0; i < senders; i++ {
+		if err := <-sendErrs; err != nil {
+			t.Fatalf("sender failed: %v", err)
+		}
+	}
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatalf("timed out: %d/%d relayed messages arrived under fan-in from %d senders",
+			received, senders*each, senders)
+	}
+}

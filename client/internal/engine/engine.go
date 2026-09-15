@@ -84,21 +84,23 @@ type exitNodeState struct {
 
 // Engine orchestrates the agent.
 type Engine struct {
-	cfg           *config.Config
-	wg            *wgmgr.Manager
-	mgm           *mgmclient.Client
-	sig           *signalclient.Client
-	ice           *ice.Manager
-	dns           *dns.Resolver
-	peers         *peer.Manager
-	forwarder     *wgmgr.Forwarder
-	relayConns    map[string]*relay.Conn    // peerKey → relay connection (for sending)
-	relayEndpts   map[string]netip.AddrPort // peerKey → virtual endpoint address
-	mu            sync.Mutex
-	links         map[string]*peerlink.Link // peerKey → data path link (relay + ICE)
-	appliedRoutes map[string][]string       // peerKey → route CIDRs currently installed in OS
-	exitNode      *exitNodeState            // non-nil when exit node routing is active
-	ctx           context.Context
+	cfg         *config.Config
+	wg          *wgmgr.Manager
+	mgm         *mgmclient.Client
+	sig         *signalclient.Client
+	ice         *ice.Manager
+	dns         *dns.Resolver
+	peers       *peer.Manager
+	forwarder   *wgmgr.Forwarder
+	relayConns  map[string]*relay.Conn    // peerKey → relay connection (for sending)
+	relayEndpts map[string]netip.AddrPort // peerKey → virtual endpoint address
+	// unknownRelayLogged rate-limits the "no data path" warning per peer.
+	unknownRelayLogged map[string]time.Time
+	mu                 sync.Mutex
+	links              map[string]*peerlink.Link // peerKey → data path link (relay + ICE)
+	appliedRoutes      map[string][]string       // peerKey → route CIDRs currently installed in OS
+	exitNode           *exitNodeState            // non-nil when exit node routing is active
+	ctx                context.Context
 
 	selfIP     string            // own mesh IP (CIDR), set after enrollment
 	lastRoutes []*commonv1.Route // routes from the most recent sync (for status)
@@ -139,17 +141,18 @@ func New(cfg *config.Config) (*Engine, error) {
 	dnsResolver := dns.New(dnsListenAddr, "blinex", cfg.DNSUpstream)
 
 	return &Engine{
-		cfg:           cfg,
-		wg:            wg,
-		mgm:           mgm,
-		sig:           sig,
-		ice:           iceMgr,
-		dns:           dnsResolver,
-		peers:         peer.New(),
-		relayConns:    make(map[string]*relay.Conn),
-		relayEndpts:   make(map[string]netip.AddrPort),
-		links:         make(map[string]*peerlink.Link),
-		appliedRoutes: make(map[string][]string),
+		cfg:                cfg,
+		wg:                 wg,
+		mgm:                mgm,
+		sig:                sig,
+		ice:                iceMgr,
+		dns:                dnsResolver,
+		peers:              peer.New(),
+		relayConns:         make(map[string]*relay.Conn),
+		relayEndpts:        make(map[string]netip.AddrPort),
+		unknownRelayLogged: make(map[string]time.Time),
+		links:              make(map[string]*peerlink.Link),
+		appliedRoutes:      make(map[string][]string),
 	}, nil
 }
 
@@ -287,7 +290,17 @@ func (e *Engine) Run(ctx context.Context) error {
 				e.mu.Unlock()
 				if ok {
 					e.wg.Bind().ReceiveFromRelay(msg.Body.Data, ep)
+					return
 				}
+				// Relayed traffic for a peer with no data path. Dropping is
+				// the only option — there is nowhere to deliver it — but
+				// dropping it *silently* is what made this class of failure
+				// so expensive to diagnose: a peer that could send to us but
+				// never receive, with nothing in any log to say so. The
+				// sender sees its packets relayed successfully and blames
+				// the network. Rate-limited because on a real failure this
+				// fires once per WireGuard retransmit.
+				e.logUnknownRelayPeer(msg.Key)
 				return
 			}
 			e.ice.HandleSignal(msg)
@@ -445,6 +458,68 @@ func (e *Engine) enrollWithRetry(ctx context.Context, meta *commonv1.PeerMeta) (
 	}
 }
 
+// ensureRelayLink builds this peer's data path if it does not already have
+// one, and is a no-op when it does. Idempotent so both the added and updated
+// sync paths can call it.
+//
+// The data path is: a peerLink wrapping the relay conn (the always-on
+// default) which, once ICE connects and probes succeed, promotes to a direct
+// conn.
+//
+//	Send:    WireGuard → RelayBind.Send → peerLink.Write → relay|ICE
+//	Receive: signal relay → ReceiveFromRelay → bind, and
+//	         ICE conn → peerLink read loop → ReceiveFromRelay → bind
+
+// unknownRelayLogInterval bounds how often a drop for an unknown peer is
+// logged. WireGuard retransmits handshakes every ~5s per peer, so an unbounded
+// log would bury everything else in the file the moment one peer's data path
+// is missing.
+const unknownRelayLogInterval = 30 * time.Second
+
+// logUnknownRelayPeer reports relayed traffic arriving for a peer this agent
+// has no data path for, at most once per unknownRelayLogInterval per peer.
+func (e *Engine) logUnknownRelayPeer(peerKey string) {
+	e.mu.Lock()
+	last, seen := e.unknownRelayLogged[peerKey]
+	now := time.Now()
+	if seen && now.Sub(last) < unknownRelayLogInterval {
+		e.mu.Unlock()
+		return
+	}
+	e.unknownRelayLogged[peerKey] = now
+	e.mu.Unlock()
+	log.Warn().Str("peer", shortKey(peerKey)).
+		Msg("dropping relayed traffic: no data path for this peer — it can reach us but we cannot reach it")
+}
+
+func (e *Engine) ensureRelayLink(peerKey, hostname, ip string) {
+	e.mu.Lock()
+	_, haveEndpoint := e.relayEndpts[peerKey]
+	_, haveLink := e.links[peerKey]
+	e.mu.Unlock()
+	if haveEndpoint && haveLink {
+		return
+	}
+
+	rc := relay.New(e.wg.PublicKey(), peerKey, e.sig)
+	endpoint := rc.Endpoint()
+	ep, _ := netip.ParseAddrPort(endpoint)
+	link := peerlink.New(ep, peerKey, rc, e.wg.Bind().ReceiveFromRelay)
+
+	e.mu.Lock()
+	e.relayConns[peerKey] = rc
+	e.relayEndpts[peerKey] = ep
+	e.links[peerKey] = link
+	e.mu.Unlock()
+
+	// Register the link as the send conn and set the WireGuard endpoint.
+	if err := e.wg.UpdateEndpoint(peerKey, endpoint, link); err != nil {
+		log.Error().Err(err).Str("peer", shortKey(peerKey)).Msg("relay endpoint setup failed")
+		return
+	}
+	log.Info().Str("peer", hostname).Str("ip", ip).Msg("peer added, relay connected via signal")
+}
+
 func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 	selfKey := e.wg.PublicKey()
 	e.mu.Lock()
@@ -540,28 +615,7 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 		}
 		e.dns.Upsert(p.DnsLabel, p.Ip)
 
-		// Data path: a peerLink wraps the relay conn (always-on default) and,
-		// once ICE connects and probes succeed, a direct ICE conn.
-		//   Send:    WireGuard → RelayBind.Send → peerLink.Write → relay|ICE
-		//   Receive: signal relay → ReceiveFromRelay → bind, and
-		//            ICE conn → peerLink read loop → ReceiveFromRelay → bind
-		rc := relay.New(e.wg.PublicKey(), p.WgPubKey, e.sig)
-		endpoint := rc.Endpoint()
-		ep, _ := netip.ParseAddrPort(endpoint)
-
-		link := peerlink.New(ep, p.WgPubKey, rc, e.wg.Bind().ReceiveFromRelay)
-		e.mu.Lock()
-		e.relayConns[p.WgPubKey] = rc
-		e.relayEndpts[p.WgPubKey] = ep
-		e.links[p.WgPubKey] = link
-		e.mu.Unlock()
-
-		// Register the link as the send conn and set the WireGuard endpoint.
-		if err := e.wg.UpdateEndpoint(p.WgPubKey, endpoint, link); err != nil {
-			log.Error().Err(err).Str("peer", shortKey(p.WgPubKey)).Msg("relay endpoint setup failed")
-		} else {
-			log.Info().Str("peer", p.Hostname).Str("ip", p.Ip).Msg("peer added, relay connected via signal")
-		}
+		e.ensureRelayLink(p.WgPubKey, p.Hostname, p.Ip)
 
 		// Start ICE to try for a direct path; peerLink upgrades only if healthy.
 		e.ice.StartConnect(e.ctx, p.WgPubKey)
@@ -586,6 +640,15 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			e.dns.Remove(u.Old.DnsLabel)
 		}
 		e.dns.Upsert(p.DnsLabel, p.Ip)
+
+		// Repair the data path if it is missing. An update used to touch only
+		// WireGuard config, routes and DNS, so a peer whose relay plumbing was
+		// never built — or was torn down — stayed permanently unreachable no
+		// matter how many syncs arrived; only an "added" event ever built it,
+		// and a peer already known to this agent never produces one. Seen live:
+		// a peer that could send to us but never receive, recovering only on a
+		// full agent restart.
+		e.ensureRelayLink(p.WgPubKey, p.Hostname, p.Ip)
 	}
 
 	for _, p := range removed {
