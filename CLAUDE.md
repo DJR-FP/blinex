@@ -48,6 +48,47 @@ docker push ghcr.io/djr-fp/blinex/dashboard:latest
 
 Each Dockerfile creates a minimal workspace (gen + the target module only) to avoid the full go.work file. All images use golang:1.25-alpine builder → alpine:3.20 runtime, run as non-root `blinex` user.
 
+## Deployment layout (important)
+
+The running stack is **not** deployed from this checkout. It runs from
+`/home/ubuntu/dockerlab/blinex-main`, which is where the `.env` lives
+(`POSTGRES_PASSWORD`, `JWT_SECRET`, …). Compose from this repo fails with
+`required variable POSTGRES_PASSWORD is missing`.
+
+Build images here, deploy from there:
+
+```bash
+# build from the real source (this repo)
+docker build -t ghcr.io/djr-fp/blinex/management:latest -f management/Dockerfile .
+docker build -t ghcr.io/djr-fp/blinex/signal:latest     -f signal/Dockerfile .
+
+# deploy
+cd /home/ubuntu/dockerlab/blinex-main
+docker compose up -d --force-recreate management signal
+```
+
+`--force-recreate` matters: `up -d` leaves a container alone when its config
+hasn't changed, and a rebuilt image under the same `:latest` tag does not
+always count as changed. Verify it actually took by comparing IDs — a restart
+is not a redeploy:
+
+```bash
+docker inspect blinex-main-management-1 --format '{{.Image}}'
+docker images --no-trunc --format '{{.ID}}' ghcr.io/djr-fp/blinex/management:latest
+```
+
+Two traps in that directory:
+
+- Its source tree is **v0.12.2** (Jul 2026). Its `build:` directives were
+  removed for that reason — a `docker compose up --build` there would have
+  compiled that source over the `:latest` tags and silently downgraded the
+  servers by many releases.
+- **Do not replace its `docker-compose.yml` with this repo's.** The volume
+  names differ (`management_tls`/`signal_tls` there,
+  `management_state`/`signal_state` here). Those volumes hold the persisted
+  self-signed TLS certs; mounting fresh ones regenerates them and breaks the
+  TOFU fingerprint every enrolled agent has pinned.
+
 ## Build commands
 
 ```bash
