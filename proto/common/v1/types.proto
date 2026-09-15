@@ -30,6 +30,12 @@ message NetworkConfig {
   string network    = 2; // full mesh network CIDR, e.g. 100.64.0.0/10
   int32  dns_port   = 3;
   string serial     = 4; // monotonic update counter
+  // WireGuard pubkey of the exit node THIS peer should route through, or
+  // empty for none. Per-peer and decided by the server: an exit node is an
+  // opt-in per device, not a mesh-wide mode. Agents must not infer one by
+  // looking for a 0.0.0.0/0 route themselves — doing so turned any single
+  // advertisement into an account-wide default-route change.
+  string exit_node  = 5;
 }
 
 message Route {

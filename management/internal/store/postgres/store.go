@@ -48,6 +48,7 @@ type peer struct {
 	Groups           string // comma-separated
 	AllowedIPs       string // comma-separated
 	AdvertisedRoutes string // comma-separated CIDRs
+	ExitNode         string // wg_pub_key of the exit node this peer uses, or empty
 	Connected        bool
 	LastSeen         time.Time
 	CreatedAt        time.Time
@@ -318,6 +319,7 @@ func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 		Groups:           joinIPs(dp.Groups),
 		AllowedIPs:       joinIPs(dp.AllowedIPs),
 		AdvertisedRoutes: joinIPs(dp.AdvertisedRoutes),
+		ExitNode:         dp.ExitNode,
 		Connected:        dp.Connected,
 		LastSeen:         dp.LastSeen,
 		CreatedAt:        dp.CreatedAt,
@@ -400,6 +402,7 @@ func toDomainPeer(p *peer) *domain.Peer {
 		Groups:           splitIPs(p.Groups),
 		AllowedIPs:       splitIPs(p.AllowedIPs),
 		AdvertisedRoutes: splitIPs(p.AdvertisedRoutes),
+		ExitNode:         p.ExitNode,
 		Connected:        p.Connected,
 		LastSeen:         p.LastSeen,
 		CreatedAt:        p.CreatedAt,

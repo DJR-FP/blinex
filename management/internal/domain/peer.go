@@ -18,6 +18,10 @@ type Peer struct {
 	Groups           []string  `json:"groups"`
 	AllowedIPs       []string  `json:"allowed_ips"`
 	AdvertisedRoutes []string  `json:"advertised_routes"` // CIDRs this peer advertises to the mesh
+	// ExitNode is the wg_pub_key of the exit node this peer routes through,
+	// or empty for none. Opt-in per device: advertising 0.0.0.0/0 offers an
+	// exit node, it does not impose one.
+	ExitNode string `json:"exit_node"`
 	Connected        bool      `json:"connected"`
 	LastSeen         time.Time `json:"last_seen"`
 	CreatedAt        time.Time `json:"created_at"`

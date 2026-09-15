@@ -228,7 +228,7 @@ func TestBuildSyncResponseIncludesRoutesAndAllowedIPs(t *testing.T) {
 		ID: "1", WGPubKey: "k1", IP: "100.64.0.1",
 		AllowedIPs: []string{"100.64.0.1/32"}, AdvertisedRoutes: []string{"10.0.0.0/24"},
 	}}
-	resp := s.buildSyncResponse(peers, nil)
+	resp := s.buildSyncResponse(peers, nil, "")
 	if len(resp.Peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(resp.Peers))
 	}

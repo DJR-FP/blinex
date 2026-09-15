@@ -91,6 +91,7 @@ func (s *Server) registerRoutes() {
 	admin.PUT("/peers/:key", s.updatePeer)
 	admin.DELETE("/peers/:key", s.deletePeer)
 	admin.PUT("/peers/:key/routes", s.setPeerRoutes)
+	admin.PUT("/peers/:key/exit-node", s.setPeerExitNode)
 
 	// Groups — read for all, write for admin. Default always exists and
 	// can't be deleted (every peer belongs to it, always).
@@ -305,6 +306,70 @@ func (s *Server) deletePeer(c *gin.Context) {
 		s.releaseIP(key)
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// setPeerExitNode selects which exit node a single peer routes through, or
+// clears it with an empty value. Per device on purpose: advertising 0.0.0.0/0
+// offers an exit node, it does not impose one on the account.
+func (s *Server) setPeerExitNode(c *gin.Context) {
+	var req struct {
+		ExitNode string `json:"exit_node"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	key := c.Param("key")
+	claims := claimsFromCtx(c)
+
+	peer, err := s.store.GetPeer(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "peer not found"})
+		return
+	}
+	if peer.AccountID != claims.AccountID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	if req.ExitNode == key {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a peer cannot use itself as an exit node"})
+		return
+	}
+
+	// Validate the choice while the operator is here to see the error, rather
+	// than silently resolving to "no exit node" at sync time.
+	if req.ExitNode != "" {
+		gw, err := s.store.GetPeer(c.Request.Context(), req.ExitNode)
+		if err != nil || gw.AccountID != claims.AccountID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "exit node peer not found"})
+			return
+		}
+		offers := false
+		for _, cidr := range gw.AdvertisedRoutes {
+			if cidr == "0.0.0.0/0" {
+				offers = true
+				break
+			}
+		}
+		if !offers {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "that peer does not advertise 0.0.0.0/0, so it is not offering an exit node"})
+			return
+		}
+	}
+
+	peer.ExitNode = req.ExitNode
+	if err := s.store.SavePeer(c.Request.Context(), peer); err != nil {
+		log.Error().Err(err).Msg("setPeerExitNode save")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+
+	if s.notify != nil {
+		s.notify(peer.AccountID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"peer": peer})
 }
 
 func (s *Server) setPeerRoutes(c *gin.Context) {

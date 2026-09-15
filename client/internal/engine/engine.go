@@ -569,17 +569,20 @@ func (e *Engine) applySync(resp *managementv1.SyncResponse) error {
 			routing.RemoveMasquerade(e.cfg.WGInterface)
 		}
 
-		// Detect whether a peer (not ourselves) is advertising a default route.
-		hasExitNode := false
-		for _, r := range resp.Routes {
-			if r.Enabled && isDefaultRoute(r.Network) && r.Gateway != selfKey {
-				hasExitNode = true
-				break
-			}
-		}
-		if hasExitNode && e.exitNode == nil {
+		// Use an exit node only when the server has selected one for THIS
+		// device. This used to scan the route list for any enabled 0.0.0.0/0
+		// belonging to another peer, so a single advertisement redirected the
+		// default route of every peer on the account at once — no opt-in, and
+		// no way to try an exit node without disrupting everyone else.
+		// Selection and validation now live server-side (resolveExitNode);
+		// an empty value means "no exit node", including when a previously
+		// chosen gateway stops advertising one.
+		useExitNode := resp.Network.GetExitNode() != "" && resp.Network.GetExitNode() != selfKey
+		if useExitNode && e.exitNode == nil {
+			log.Info().Str("gateway", shortKey(resp.Network.GetExitNode())).Msg("activating exit node")
 			e.activateExitNode()
-		} else if !hasExitNode && e.exitNode != nil {
+		} else if !useExitNode && e.exitNode != nil {
+			log.Info().Msg("deactivating exit node")
 			e.deactivateExitNode()
 		}
 	} else {

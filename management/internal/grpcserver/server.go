@@ -220,7 +220,7 @@ func (s *Server) Sync(req *managementv1.SyncRequest, stream managementv1.Managem
 		if err != nil {
 			return fmt.Errorf("listing rules: %w", err)
 		}
-		resp := s.buildSyncResponse(peers, rules)
+		resp := s.buildSyncResponse(peers, rules, req.WgPubKey)
 		return stream.Send(resp)
 	}
 
@@ -291,7 +291,7 @@ func (s *Server) GetBlocklist(ctx context.Context, req *managementv1.GetBlocklis
 	return &managementv1.GetBlocklistResponse{Version: version, Domains: domains}, nil
 }
 
-func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.Rule) *managementv1.SyncResponse {
+func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.Rule, selfKey string) *managementv1.SyncResponse {
 	var pbPeers []*commonv1.Peer
 	var routes []*commonv1.Route
 
@@ -354,8 +354,50 @@ func (s *Server) buildSyncResponse(peers []*domain.Peer, domainRules []*domain.R
 		Peers:  pbPeers,
 		Routes: routes,
 		Rules:  pbRules,
+		Network: &commonv1.NetworkConfig{
+			Network:  s.network,
+			ExitNode: resolveExitNode(peers, selfKey),
+		},
 		Serial: fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
+}
+
+// resolveExitNode returns the exit node selfKey should route through, or "".
+//
+// Chosen per device and resolved here rather than in the agent. The agent used
+// to scan the route list for any enabled 0.0.0.0/0 belonging to someone else,
+// which made a single advertisement redirect every peer's default route at
+// once — no opt-in, and no way to test an exit node on a shared account
+// without disrupting everyone on it.
+//
+// The selection is validated rather than trusted: the named peer must still
+// exist, must not be the peer itself, and must actually advertise a default
+// route. A selection that no longer holds resolves to "" — no exit node —
+// because the failure mode of routing a device's whole default route at a
+// gateway that is not offering one is far worse than not using an exit node.
+func resolveExitNode(peers []*domain.Peer, selfKey string) string {
+	var chosen string
+	for _, p := range peers {
+		if p.WGPubKey == selfKey {
+			chosen = p.ExitNode
+			break
+		}
+	}
+	if chosen == "" || chosen == selfKey {
+		return ""
+	}
+	for _, p := range peers {
+		if p.WGPubKey != chosen {
+			continue
+		}
+		for _, cidr := range p.AdvertisedRoutes {
+			if cidr == "0.0.0.0/0" {
+				return chosen
+			}
+		}
+		return "" // selected peer is no longer offering an exit node
+	}
+	return "" // selected peer is gone
 }
 
 func expandGroupRule(r *domain.Rule, groupIPs map[string][]string) []*domain.Rule {
