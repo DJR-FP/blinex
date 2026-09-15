@@ -212,3 +212,107 @@ func TestConcurrentSendersToOnePeer(t *testing.T) {
 			received, senders*each, senders)
 	}
 }
+
+// Signaling addressed to a peer that is mid-reconnect must survive. A peer is
+// absent for a few seconds whenever its agent restarts, and an OFFER lost in
+// that window stalls ICE negotiation with nothing reported to the sender.
+// Against the old behaviour this fails: the message was discarded with only a
+// debug line.
+func TestSignalingHeldForReconnectingPeerIsDelivered(t *testing.T) {
+	conn := startServer(t)
+	const absent = "absent-peer"
+	const sender = "sender-peer"
+
+	// Sender is up; target has not registered yet.
+	send := openStream(t, conn, makeToken(sender))
+	if err := send.Send(&signalv1.Message{Key: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if err := send.Send(&signalv1.Message{
+		Key: sender, RemoteKey: absent,
+		Body: &signalv1.Body{Type: signalv1.Body_OFFER, Payload: `{"ufrag":"u1"}`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Make sure the server has actually routed that OFFER while the target is
+	// still absent. Messages on one stream are processed in order, so a
+	// self-addressed message that comes back proves the OFFER was handled
+	// first. Without this the target can register before the OFFER is routed,
+	// it gets delivered normally, and the test passes against the old
+	// drop-everything behaviour — verified by reverting.
+	if err := send.Send(&signalv1.Message{
+		Key: sender, RemoteKey: sender,
+		Body: &signalv1.Body{Type: signalv1.Body_CANDIDATE, Payload: "sync"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := send.Recv(); err != nil {
+		t.Fatalf("sync round-trip failed: %v", err)
+	}
+
+	// Now the target arrives, as it would after an agent restart.
+	recv := openStream(t, conn, makeToken(absent))
+	if err := recv.Send(&signalv1.Message{Key: absent}); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan *signalv1.Message, 1)
+	go func() {
+		m, err := recv.Recv()
+		if err == nil {
+			done <- m
+		}
+	}()
+
+	select {
+	case m := <-done:
+		if m.Body.GetType() != signalv1.Body_OFFER || m.Body.GetPayload() != `{"ufrag":"u1"}` {
+			t.Fatalf("wrong message delivered: %v", m.Body)
+		}
+		if m.Key != sender {
+			t.Errorf("sender key = %q, want %q", m.Key, sender)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("signaling sent while the peer was reconnecting was never delivered")
+	}
+}
+
+// WireGuard data is deliberately NOT held: it has UDP semantics, WireGuard
+// retransmits on its own, and queueing it would deliver stale packets after a
+// reconnect and let a busy link grow the queue without bound.
+func TestRelayDataForAbsentPeerIsNotQueued(t *testing.T) {
+	srv := New()
+	srv.handleAbsentTarget(&signalv1.Message{
+		Key: "a", RemoteKey: "gone",
+		Body: &signalv1.Body{Type: signalv1.Body_RELAY, Data: []byte("wg packet")},
+	})
+	if len(srv.pending) != 0 {
+		t.Fatalf("relay data must not be queued, got %d queued peers", len(srv.pending))
+	}
+}
+
+func TestPendingQueueIsBoundedAndExpires(t *testing.T) {
+	srv := New()
+	const peer = "peer"
+	for i := 0; i < pendingPerPeer+10; i++ {
+		srv.handleAbsentTarget(&signalv1.Message{
+			Key: "s", RemoteKey: peer,
+			Body: &signalv1.Body{Type: signalv1.Body_CANDIDATE, Payload: string(rune('a' + i%26))},
+		})
+	}
+	if got := len(srv.pending[peer].msgs); got != pendingPerPeer {
+		t.Errorf("queue length = %d, want it capped at %d", got, pendingPerPeer)
+	}
+
+	// Stale queues are not delivered, and are not left to leak either.
+	srv.pending[peer].at = time.Now().Add(-pendingTTL - time.Second)
+	srv.mu.Lock()
+	got := srv.takePendingLocked(peer)
+	srv.mu.Unlock()
+	if got != nil {
+		t.Error("an expired queue must not be delivered")
+	}
+	if _, still := srv.pending[peer]; still {
+		t.Error("an expired queue must be removed")
+	}
+}
