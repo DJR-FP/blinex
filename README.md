@@ -807,6 +807,7 @@ Version mismatch between agent and server. Make sure both are running the same v
 ## Roadmap
 
 ### Next up
+- [ ] **Exit node: per-device opt-in** — `engine.go` activates exit routing on *every* peer the moment *any* peer advertises `0.0.0.0/0`; there is no way for a device to choose. Tailscale and NetBird both allow it. This also makes an exit node impossible to test on a shared account without pulling every other peer's internet traffic through it
 - [ ] **Code-sign the Windows binary** — an unsigned agent that creates a persistent service, rewrites system DNS, and binds port 53 reads as textbook DNS-hijacking malware to Windows Defender's heuristics, and it acted on that: during v0.18.0's own rollout, Defender detected and fully removed both a running v0.17.0 process (mid-session, leaving the machine's DNS stuck pointed at a dead resolver until manually reset) and, later, the newly-installed v0.18.0 service itself, deleting its SCM registration entirely — not a bug in the agent, a real detection. `install` now prints a warning and a `Get-MpThreatDetection`/exclusion pointer, but that's a testing workaround, not a fix; a real release needs a proper code-signing certificate
 - [ ] **OIDC / SSO login** — Google, GitHub OAuth2 as an alternative to setup key login
 - [ ] **ICE restart** — reconnect peers automatically on connection drop without agent restart

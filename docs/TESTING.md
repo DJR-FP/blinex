@@ -435,9 +435,15 @@ not inferred from shared code.
 | ACL teardown, no stale deny | ✅ | ✅ | removing the rule fully restored ICMP |
 | Subnet routing — consumer | ✅ | ✅ | works with **no** hand-written ACL rule (v0.21.4) |
 | Subnet routing — forwarding | ✅ | ✅ | `pktmon` shows the packet leaving the physical NIC |
-| Subnet routing — NAT | ✅ | ❌ | **blocked**: WinNAT absent, see §7c |
-| Exit node — gateway | ✅ | ⬜ | blocked behind the same NAT gap |
+| Subnet routing — NAT (serving) | ✅ | ➖ | **out of scope** — Windows peers only consume |
+| Exit node — gateway | ✅ | ➖ | **out of scope** — Windows peers only consume |
 | Exit node — consumer | ✅ | ⬜ | see "exit node is account-wide" below |
+
+**Scope: a Windows peer only ever needs to *consume*.** Serving as a subnet
+router or exit node is explicitly not required, so the missing WinNAT
+(`MSFT_NetNat` absent on stock Windows 10 without Hyper-V/Containers) is a
+documented limitation rather than a gap to close. Do not enable Hyper-V or add
+a `100.64.0.0/10` static route on the LAN router on account of it.
 
 **Windows can *use* subnet routes, it just cannot *serve* them.** Verified with
 a Linux gateway advertising `10.0.0.0/24`: Windows installed
