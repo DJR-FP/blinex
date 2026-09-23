@@ -49,7 +49,6 @@ type peer struct {
 	AllowedIPs       string // comma-separated
 	AdvertisedRoutes string // comma-separated CIDRs
 	ExitNode         string // wg_pub_key of the exit node this peer uses, or empty
-	Connected        bool
 	LastSeen         time.Time
 	CreatedAt        time.Time
 }
@@ -104,6 +103,15 @@ func New(dsn string) (*Store, error) {
 
 	if err := db.AutoMigrate(&account{}, &setupKey{}, &peer{}, &group{}, &rule{}); err != nil {
 		return nil, fmt.Errorf("auto-migrate: %w", err)
+	}
+
+	// peers.connected was never read back: liveness is derived per-request from
+	// the set of open Sync streams. AutoMigrate does not drop removed columns,
+	// so shed it explicitly on deployments created before it was removed.
+	if m.HasColumn(&peer{}, "connected") {
+		if err := m.DropColumn(&peer{}, "connected"); err != nil {
+			return nil, fmt.Errorf("dropping legacy peers.connected: %w", err)
+		}
 	}
 
 	// Every peer is always in Default (see domain.DefaultGroupName) — but
@@ -320,7 +328,6 @@ func (s *Store) SavePeer(_ context.Context, dp *domain.Peer) error {
 		AllowedIPs:       joinIPs(dp.AllowedIPs),
 		AdvertisedRoutes: joinIPs(dp.AdvertisedRoutes),
 		ExitNode:         dp.ExitNode,
-		Connected:        dp.Connected,
 		LastSeen:         dp.LastSeen,
 		CreatedAt:        dp.CreatedAt,
 	}).Error
@@ -403,7 +410,6 @@ func toDomainPeer(p *peer) *domain.Peer {
 		AllowedIPs:       splitIPs(p.AllowedIPs),
 		AdvertisedRoutes: splitIPs(p.AdvertisedRoutes),
 		ExitNode:         p.ExitNode,
-		Connected:        p.Connected,
 		LastSeen:         p.LastSeen,
 		CreatedAt:        p.CreatedAt,
 	}

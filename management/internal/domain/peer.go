@@ -22,7 +22,7 @@ type Peer struct {
 	// or empty for none. Opt-in per device: advertising 0.0.0.0/0 offers an
 	// exit node, it does not impose one.
 	ExitNode string `json:"exit_node"`
-	Connected        bool      `json:"connected"`
+	Connected        bool      `json:"connected"` // live-only: derived from open Sync streams, never persisted
 	LastSeen         time.Time `json:"last_seen"`
 	CreatedAt        time.Time `json:"created_at"`
 }
